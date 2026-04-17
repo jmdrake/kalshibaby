@@ -1,4 +1,4 @@
-# KalshiSitter 🍼
+# KalshiBaby 🍼
 
 A lightweight Python “babysitter” bot for managing open positions on Kalshi.
 
