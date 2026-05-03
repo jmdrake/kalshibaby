@@ -1,0 +1,18 @@
+# Private configs (use config.example.yaml as the template)
+config.yaml
+config.demo.yaml
+config.production.yaml
+
+# Private keys — never commit
+*.pem
+*.key
+newkey.txt
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Claude local settings
+.claude/

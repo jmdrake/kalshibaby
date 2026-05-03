@@ -1,0 +1,80 @@
+mode: "paper"     # "paper" = log only, "live" = real orders when event is armed
+
+event_ticker: KXBRENTW-26MAY0117     # bootstrap event (used if portfolio sync is unavailable)
+settlement_time: "2026-05-30T15:00:00-04:00"
+
+api:
+  key_id: "KEY-ID-FROM-KALSHI"
+  private_key_path: "your-key-file.txt"
+  base_url: "https://api.elections.kalshi.com"
+
+armed: false
+poll_seconds: 3
+
+safety:
+  global_drawdown_limit: -50.00     # flatten all if total unrealized P/L drops below this
+   
+# External price sources. Disable any source that becomes unreliable.
+sources:
+  oilprice:
+    enabled: true
+    color: "#2563eb"
+    min_refresh_seconds: 15
+    symbol: "WTI-Crude" 
+  yahoo:
+    enabled: true
+    color: "#16a34a"
+    symbol: "BZ=F"
+    min_refresh_seconds: 60
+  kalshi_implied:
+    enabled: true
+    color: "#f97316"
+    min_refresh_seconds: 3
+
+# Position rows can be edited in the UI at runtime too.
+positions:
+  - ticker: "KXBRENTW-26MAY0117-T109.99"
+    side: "yes"
+    strike: 109.99
+    count: 10
+    avg_price: 0.7350
+
+  - ticker: "KXBRENTW-26MAY0117-T113.99"
+    side: "no"
+    strike: 113.99
+    count: 10
+    avg_price: 0.6960
+
+profit_harvest:
+  arm_at: 0.88
+  first_trim_at: 0.90
+  second_trim_at: 0.93
+  full_exit_at: 0.96
+  trail_after_arm: 0.04
+  trail_after_90: 0.03
+  first_trim_fraction: 0.33
+  second_trim_fraction: 0.33
+
+shock_logic:
+  shock_threshold_pct: 2.0
+  shock_window_minutes: 10
+  recovery_window_minutes: 15
+  min_recovery_pct: 0.75
+  hard_break_confirm_minutes: 15
+
+source_consensus:
+  max_external_disagreement: 1.50
+  kalshi_lag_threshold: 1.00
+  stale_after_seconds: 90
+
+structure:
+  max_yes_no_imbalance: 1.75
+  min_table_width: 4.00
+  lower_boundary_buffer: 0.75
+  upper_boundary_buffer: 0.75
+
+time_risk:
+  tighten_under_hours: 3
+  flatten_unstable_under_minutes: 60
+
+# Execution is governed by `mode` (paper/live) + per-event arm toggle in the UI.

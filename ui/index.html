@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>KalshiBaby v3</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="/ui/styles.css" />
+</head>
+<body>
+  <header>
+    <div>
+      <h1>KalshiBaby v3</h1>
+      <div id="modeBadge" class="mode-badge paper">PAPER</div>
+    </div>
+    <div class="header-actions">
+      <div class="header-pl">
+        <div class="muted" style="font-size:11px">TOTAL P/L</div>
+        <div id="headerPL" class="big" style="font-size:20px">—</div>
+      </div>
+      <button id="sellAllBtn" class="danger">SELL EVERYTHING NOW</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Global source toggles -->
+    <section class="card wide source-card">
+      <div class="card-title">Price Sources</div>
+      <div class="source-row">
+        <label><input type="checkbox" id="src_oilprice" /> <span class="dot blue"></span> Spot</label>
+        <label><input type="checkbox" id="src_yahoo" /> <span class="dot green"></span> Yahoo</label>
+        <label><input type="checkbox" id="src_kalshi_implied" /> <span class="dot orange"></span> Kalshi implied</label>
+      </div>
+    </section>
+
+    <!-- Event sections — rendered dynamically by app.js -->
+    <div id="eventsContainer"></div>
+
+    <!-- Global parameters -->
+    <section class="grid two-col">
+      <div class="card">
+        <div class="card-title">Global Parameters</div>
+        <div class="params">
+          <label>Poll seconds <input id="pollSeconds" type="number" step="1" /></label>
+          <label>Shock % <input id="shockThreshold" type="number" step="0.1" /></label>
+          <label>Recovery min % <input id="minRecovery" type="number" step="0.1" /></label>
+          <label>Arm profit @ <input id="armAt" type="number" step="0.01" /></label>
+          <label>First trim @ <input id="firstTrim" type="number" step="0.01" /></label>
+          <label>Trail after .90 <input id="trailAfter90" type="number" step="0.01" /></label>
+          <label>Drawdown limit % <input id="drawdownLimit" type="number" step="1" /></label>
+        </div>
+        <button id="saveParamsBtn">Save Parameters</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Mode</div>
+        <div style="margin-bottom:12px">
+          <div class="muted" style="margin-bottom:8px">Current execution mode:</div>
+          <div id="modeDisplay" class="big" style="font-size:24px">PAPER</div>
+        </div>
+        <div class="muted" style="margin-bottom:8px">
+          PAPER — logs actions, no real orders.<br>
+          LIVE — executes when event is armed.
+        </div>
+        <div class="mode-btns">
+          <button id="setPaperBtn">Set PAPER</button>
+          <button id="setLiveBtn" class="danger">Set LIVE</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Global actions + logs -->
+    <section class="grid">
+      <div class="card">
+        <div class="card-title">Actions</div>
+        <div id="actions"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Logs</div>
+        <div id="logs"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>
