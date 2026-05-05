@@ -24,6 +24,8 @@ import uuid
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
+import logging
+import logging.handlers
 import os
 
 import requests
@@ -40,6 +42,20 @@ _config_env = os.environ.get("KALSHI_CONFIG", "config.yaml")
 CONFIG_PATH = Path(_config_env)
 if not CONFIG_PATH.exists():
     CONFIG_PATH = Path("config.example.yaml")
+
+# Persistent rotating log — survives server restarts, keeps 7 days of history.
+_log_stem = CONFIG_PATH.stem  # e.g. "config.demo" → "kalshibaby.config.demo.log"
+_file_handler = logging.handlers.TimedRotatingFileHandler(
+    filename=f"kalshibaby.{_log_stem}.log",
+    when="midnight",
+    backupCount=7,
+    encoding="utf-8",
+)
+_file_handler.setFormatter(logging.Formatter("%(asctime)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+_flog = logging.getLogger("kalshibaby")
+_flog.setLevel(logging.DEBUG)
+_flog.addHandler(_file_handler)
+_flog.propagate = False
 
 
 Side = Literal["yes", "no"]
@@ -117,7 +133,7 @@ class Position(BaseModel):
     ticker: str
     side: Side
     strike: float
-    count: int
+    count: float
     avg_price: float
     current_bid: float = 0.0
     current_ask: float = 0.0
@@ -156,7 +172,7 @@ class Action(BaseModel):
     event_ticker: Optional[str] = None
     ticker: Optional[str] = None
     side: Optional[Side] = None
-    qty: Optional[int] = None
+    qty: Optional[float] = None
 
 
 class RiskSnapshot(BaseModel):
@@ -169,8 +185,8 @@ class RiskSnapshot(BaseModel):
     worst_settlement_loss: float
     modeled_stop_loss_value: float
     modeled_stop_loss: float
-    yes_count: int
-    no_count: int
+    yes_count: float
+    no_count: float
     imbalance_ratio: float
     settlement_map: List[Dict[str, float]]
 
@@ -216,7 +232,7 @@ class ArmEventRequest(BaseModel):
 class SellRequest(BaseModel):
     ticker: Optional[str] = None
     event_ticker: Optional[str] = None
-    qty: Optional[int] = None
+    qty: Optional[float] = None
     confirm: bool = False
 
 
@@ -449,17 +465,21 @@ class KalshiClient:
         mid = (bid + ask) / 2 if bid and ask else bid or ask or 0.0
         return bid, ask, mid
 
-    async def sell_position(self, ticker: str, side: Side, qty: int) -> Dict[str, Any]:
+    async def sell_position(self, ticker: str, side: Side, qty: float, bid: float = 0.0) -> Dict[str, Any]:
         path = "/trade-api/v2/portfolio/orders"
         url = self.base_url + path
+        if qty % 1 != 0:
+            return {"ok": False, "error": f"Fractional position ({qty} contracts) cannot be sold via API — close manually on Kalshi."}
+        price_key = "yes_price" if side == "yes" else "no_price"
         payload = {
             "ticker": ticker,
             "action": "sell",
             "side": side,
-            "count": qty,
+            "count": int(qty),
             "client_order_id": str(uuid.uuid4()),
-            "time_in_force": "fill_or_kill",
+            "time_in_force": "immediate_or_cancel",
             "reduce_only": True,
+            price_key: 1,
         }
         try:
             r = requests.post(url, headers=self._auth_headers("POST", path), json=payload, timeout=10)
@@ -507,7 +527,9 @@ class EventEngine:
 
     def log(self, msg: str) -> None:
         stamp = datetime.now().strftime("%H:%M:%S")
-        self._logs.appendleft(f"[{self.event_ticker}] {stamp} {msg}")
+        line = f"[{self.event_ticker}] {stamp} {msg}"
+        self._logs.appendleft(line)
+        _flog.info(line)
 
     def _add_action(
         self,
@@ -516,7 +538,7 @@ class EventEngine:
         reason: str,
         ticker: Optional[str] = None,
         side: Optional[Side] = None,
-        qty: Optional[int] = None,
+        qty: Optional[float] = None,
     ) -> None:
         recent = list(self._actions)[:5]
         for a in recent:
@@ -635,12 +657,10 @@ class EventEngine:
     # -----------------------------------------------------------------------
 
     def evaluate_state_machine(self) -> None:
-        if self.armed and self.state == "OBSERVE_ONLY":
+        if self.state == "OBSERVE_ONLY":
             self.state = "NORMAL"
-        elif not self.armed:
-            self.state = "OBSERVE_ONLY"
-            return  # No logic when disarmed
 
+        self._check_endangered()
         self._detect_shock()
         self._classify_shock()
         self._profit_harvest()
@@ -705,7 +725,9 @@ class EventEngine:
         buf_lo = self.params.structure.get("lower_boundary_buffer", 0.75)
         buf_hi = self.params.structure.get("upper_boundary_buffer", 0.75)
         if p.side == "yes":
+            # YES wins if settlement > strike. Pre-emptive exit when approaching from above.
             return consensus < (p.strike + buf_lo)
+        # NO wins if settlement < strike. Pre-emptive exit when approaching from below.
         return consensus > (p.strike - buf_hi)
 
     def _exit_endangered_legs(self, reason: str) -> None:
@@ -715,6 +737,25 @@ class EventEngine:
                 continue
             if self.position_endangered(p, consensus):
                 self._add_action("danger", "SELL_LEG", reason, p.ticker, p.side, p.count)
+                if self.params.mode == "live" and self.armed:
+                    asyncio.create_task(self._execute_sell(p, p.count))
+
+    def _check_endangered(self) -> None:
+        """Proactive per-tick stop-loss: exits any leg whose consensus has crossed its strike buffer.
+        Runs every tick and keeps retrying until count reaches 0."""
+        consensus = self.consensus_price()
+        if consensus is None:
+            return
+        for p in self.positions:
+            if p.count <= 0:
+                continue
+            if self.position_endangered(p, consensus):
+                self.state = "FLATTENING"
+                self._add_action(
+                    "danger", "SELL_LEG",
+                    f"Stop-loss: consensus {consensus:.2f} past strike buffer ({p.side.upper()} T{p.strike})",
+                    p.ticker, p.side, p.count,
+                )
                 if self.params.mode == "live" and self.armed:
                     asyncio.create_task(self._execute_sell(p, p.count))
 
@@ -737,19 +778,19 @@ class EventEngine:
                     asyncio.create_task(self._execute_sell(p, qty))
                 continue
             if mid >= ph.get("second_trim_at", 0.93):
-                qty = max(1, math.ceil(p.count * ph.get("second_trim_fraction", 0.33)))
+                qty = round(p.count * ph.get("second_trim_fraction", 0.33), 6)
                 self._add_action("info", "TRIM", f"Second profit trim: {mid:.2f} >= second_trim_at.", p.ticker, p.side, qty)
                 if self.params.mode == "live" and self.armed:
                     asyncio.create_task(self._execute_sell(p, qty))
                 continue
             if mid >= ph.get("first_trim_at", 0.90):
-                qty = max(1, math.ceil(p.count * ph.get("first_trim_fraction", 0.33)))
+                qty = round(p.count * ph.get("first_trim_fraction", 0.33), 6)
                 self._add_action("info", "TRIM", f"First profit trim: {mid:.2f} >= first_trim_at.", p.ticker, p.side, qty)
                 if self.params.mode == "live" and self.armed:
                     asyncio.create_task(self._execute_sell(p, qty))
                 continue
             if peak >= ph.get("arm_at", 0.88) and mid <= peak - trail:
-                qty = max(1, math.ceil(p.count * ph.get("first_trim_fraction", 0.33)))
+                qty = round(p.count * ph.get("first_trim_fraction", 0.33), 6)
                 self._add_action("warn", "TRIM", f"Trailing stop: {mid:.2f} fell from peak {peak:.2f}.", p.ticker, p.side, qty)
                 if self.params.mode == "live" and self.armed:
                     asyncio.create_task(self._execute_sell(p, qty))
@@ -786,7 +827,8 @@ class EventEngine:
             self.log(f"PAPER: would sell {qty} {p.side.upper()} {p.ticker}")
             return
         qty = min(qty, p.count)
-        result = await self.kalshi.sell_position(p.ticker, p.side, qty)
+        bid = p.current_bid or p.current_mid
+        result = await self.kalshi.sell_position(p.ticker, p.side, qty, bid=bid)
         if result.get("ok"):
             p.count -= qty
             self.log(f"SOLD {qty} {p.side.upper()} {p.ticker}")
@@ -800,11 +842,16 @@ class EventEngine:
             if p.count > 0:
                 qty = p.count
                 if self.params.mode == "live" and self.armed:
-                    result = await self.kalshi.sell_position(p.ticker, p.side, qty)
+                    bid = p.current_bid or p.current_mid
+                    result = await self.kalshi.sell_position(p.ticker, p.side, qty, bid=bid)
                     if result.get("ok"):
                         p.count = 0
+                        self.log(f"SOLD {qty} {p.side.upper()} {p.ticker}")
+                    else:
+                        self.log(f"SELL FAILED {p.ticker}: {result}")
                     results.append(result)
                 else:
+                    self.log(f"PAPER: would flatten {qty} {p.side.upper()} {p.ticker}")
                     results.append({"ok": True, "paper": True, "ticker": p.ticker, "qty": qty})
         return results
 
@@ -918,6 +965,7 @@ class Engine:
         )
 
         self.event_engines: Dict[str, EventEngine] = {}
+        self._safety_triggered = False  # prevents re-firing kill switch every tick
 
         # Bootstrap from config positions (bootstrap survives even if portfolio sync fails).
         if config.get("event_ticker") and config.get("positions"):
@@ -953,7 +1001,9 @@ class Engine:
 
     def log(self, msg: str) -> None:
         stamp = datetime.now().strftime("%H:%M:%S")
-        self.logs.appendleft(f"{stamp} {msg}")
+        line = f"{stamp} {msg}"
+        self.logs.appendleft(line)
+        _flog.info(line)
 
     def _add_action(self, severity: str, action: str, reason: str) -> None:
         self.actions.appendleft(Action(ts=now_ts(), severity=severity, action=action, reason=reason))
@@ -1005,7 +1055,9 @@ class Engine:
                 continue
 
             side: Side = "yes" if pos_float > 0 else "no"
-            count = int(abs(pos_float))
+            count = abs(pos_float)
+            if count % 1 != 0:
+                self.log(f"WARNING: {ticker} has fractional count {count} — bot cannot sell this, close manually on Kalshi.")
 
             # Cost basis = contracts cost + fees (matches what Kalshi shows as avg price).
             def _flt(val: Any) -> float:
@@ -1070,6 +1122,12 @@ class Engine:
     # -----------------------------------------------------------------------
 
     def _check_global_safety(self) -> None:
+        # Reset flag once all positions are flat so the switch can re-arm.
+        if self._safety_triggered:
+            all_flat = all(p.count <= 0 for e in self.event_engines.values() for p in e.positions)
+            if all_flat:
+                self._safety_triggered = False
+            return
         snapshots = [e.risk_snapshot() for e in self.event_engines.values()]
         total_cost = sum(s.cost_basis for s in snapshots)
         total_pl   = sum(s.unrealized_pl for s in snapshots)
@@ -1078,10 +1136,9 @@ class Engine:
         pct = (total_pl / total_cost) * 100.0
         limit = self.params.safety.get("global_drawdown_limit", -50.0)
         if pct <= limit:
-            self.log(f"SAFETY: Global P/L {pct:.1f}% <= drawdown limit {limit:.1f}%. Flattening all.")
-            self._add_action("danger", "SELL_ALL", f"Global drawdown kill switch: {pct:.1f}%")
-            for eng in self.event_engines.values():
-                asyncio.create_task(eng.flatten())
+            self._safety_triggered = True
+            self.log(f"SAFETY ALERT: Global P/L {pct:.1f}% <= drawdown limit {limit:.1f}%. Use SELL EVERYTHING in the UI.")
+            self._add_action("danger", "ALERT", f"KILL SWITCH THRESHOLD BREACHED: {pct:.1f}% — use SELL EVERYTHING button to flatten.")
 
     # -----------------------------------------------------------------------
     # Main loop
