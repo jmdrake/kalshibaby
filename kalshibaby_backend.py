@@ -340,21 +340,81 @@ class OilPriceSource(PriceSource):
         self._last_price: Optional[float] = None
         self._last_fetch_ts: float = 0.0
 
+    # oilprice.com serves static HTML that is updated by JavaScript in the browser.
+    # The homepage embeds the price AND a staleness label ("•2 hours") in the same
+    # row. We scrape both so we can reject prices that are too old.
+    _MAX_PAGE_AGE_MINUTES = 5   # refuse price if the page label says it's older than this
+
     def _fetch(self) -> float:
         html = requests.get(
-            "https://oilprice.com/oil-price-charts/",
+            "https://oilprice.com/",
             headers={"User-Agent": "Mozilla/5.0"},
             timeout=15,
         ).text
         soup = BeautifulSoup(html, "html.parser")
-        row = soup.find("tr", {"data-name": self.symbol})
-        if not row:
-            raise ValueError(f"Row not found for {self.symbol}")
-        cell = row.find("td", class_="last_price")
-        if not cell:
-            raise ValueError(f"Price cell not found for {self.symbol}")
-        price = cell.get("data-price") or cell.get_text(strip=True)
-        return float(price)
+
+        # Locate the row by matching the label cell text (e.g. "WTI Crude•2 hours")
+        label_map = {
+            "WTI-Crude":    "WTI Crude",
+            "Brent-Crude":  "Brent Crude",
+            "Natural-Gas":  "Natural Gas",
+        }
+        label = label_map.get(self.symbol, self.symbol.replace("-", " "))
+
+        target_row = None
+        for tr in soup.find_all("tr"):
+            cells = tr.find_all("td")
+            for c in cells:
+                txt = c.get_text(strip=True)
+                if txt.startswith(label + "•") or txt == label:
+                    target_row = tr
+                    # Parse the staleness indicator, e.g. "WTI Crude•2 hours"
+                    if "•" in txt:
+                        age_str = txt.split("•", 1)[1].strip()   # "2 hours"
+                        age_minutes = self._parse_age_minutes(age_str)
+                        if age_minutes is not None and age_minutes > self._MAX_PAGE_AGE_MINUTES:
+                            raise ValueError(
+                                f"oilprice.com data is {age_str} old (>{self._MAX_PAGE_AGE_MINUTES} min limit)"
+                            )
+                    break
+            if target_row:
+                break
+
+        if not target_row:
+            raise ValueError(f"Row not found for {self.symbol} ({label})")
+
+        # Price is in the td.value cell (4th column)
+        value_cell = target_row.find("td", class_="value")
+        if not value_cell:
+            cells = target_row.find_all("td")
+            # price is typically the first numeric-looking cell
+            for c in cells:
+                txt = c.get_text(strip=True)
+                try:
+                    return float(txt)
+                except ValueError:
+                    continue
+            raise ValueError(f"No numeric cell found in row for {self.symbol}")
+        return float(value_cell.get_text(strip=True))
+
+    @staticmethod
+    def _parse_age_minutes(age_str: str) -> Optional[float]:
+        """Convert age strings like '2 hours', '30 minutes', '1 day' to minutes."""
+        import re
+        m = re.match(r"(\d+)\s*(minute|hour|day|second)", age_str, re.IGNORECASE)
+        if not m:
+            return None
+        n = int(m.group(1))
+        unit = m.group(2).lower()
+        if unit.startswith("second"):
+            return n / 60.0
+        if unit.startswith("minute"):
+            return float(n)
+        if unit.startswith("hour"):
+            return n * 60.0
+        if unit.startswith("day"):
+            return n * 1440.0
+        return None
 
     async def get_price(self) -> PricePoint:
         now = now_ts()
