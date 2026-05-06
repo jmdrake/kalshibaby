@@ -13,11 +13,14 @@
       <h1>KalshiBaby v3</h1>
       <div id="modeBadge" class="mode-badge paper">PAPER</div>
     </div>
+    <div class="header-scoreboard" id="headerScoreboard">
+      <span class="muted">Started: <b id="sbStart">—</b></span>
+      <span class="muted">Cash: <b id="sbCash">—</b></span>
+      <span class="muted">Realized: <b id="sbRealized">—</b></span>
+      <span class="muted">Unrealized: <b id="sbUnrealized">—</b></span>
+      <span class="muted">Net: <b id="sbNet">—</b> <span id="sbPct" class="muted"></span></span>
+    </div>
     <div class="header-actions">
-      <div class="header-pl">
-        <div class="muted" style="font-size:11px">TOTAL P/L</div>
-        <div id="headerPL" class="big" style="font-size:20px">—</div>
-      </div>
       <button id="sellAllBtn" class="danger">SELL EVERYTHING NOW</button>
     </div>
   </header>
@@ -36,6 +39,15 @@
     <!-- Event sections — rendered dynamically by app.js -->
     <div id="eventsContainer"></div>
 
+    <!-- Buy candidates -->
+    <section class="card wide" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div class="card-title" style="margin:0">Buy Candidates <span class="muted" style="font-weight:400;font-size:12px">(entry zone 70–80¢)</span></div>
+        <button class="small muted-btn" onclick="refreshCandidates()">Scan</button>
+      </div>
+      <div id="candidatesContainer"><span class="muted">Press Scan to search open markets.</span></div>
+    </section>
+
     <!-- Global parameters -->
     <section class="grid two-col">
       <div class="card">
@@ -44,9 +56,9 @@
           <label>Poll seconds <input id="pollSeconds" type="number" step="1" /></label>
           <label>Shock % <input id="shockThreshold" type="number" step="0.1" /></label>
           <label>Recovery min % <input id="minRecovery" type="number" step="0.1" /></label>
-          <label>Arm profit @ <input id="armAt" type="number" step="0.01" /></label>
-          <label>First trim @ <input id="firstTrim" type="number" step="0.01" /></label>
-          <label>Trail after .90 <input id="trailAfter90" type="number" step="0.01" /></label>
+          <label>Entry zone min ¢ <input id="entryZoneMin" type="number" step="0.01" /></label>
+          <label>Entry zone max ¢ <input id="entryZoneMax" type="number" step="0.01" /></label>
+          <label>Max deploy % <input id="maxDeployPct" type="number" step="0.05" /></label>
           <label>Drawdown limit % <input id="drawdownLimit" type="number" step="1" /></label>
         </div>
         <button id="saveParamsBtn">Save Parameters</button>

@@ -12,6 +12,7 @@ Open:
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import time
 from bs4 import BeautifulSoup
@@ -42,6 +43,8 @@ _config_env = os.environ.get("KALSHI_CONFIG", "config.yaml")
 CONFIG_PATH = Path(_config_env)
 if not CONFIG_PATH.exists():
     CONFIG_PATH = Path("config.example.yaml")
+
+SESSION_PATH = Path("session.json")
 
 # Persistent rotating log — survives server restarts, keeps 7 days of history.
 _log_stem = CONFIG_PATH.stem  # e.g. "config.demo" → "kalshibaby.config.demo.log"
@@ -125,6 +128,11 @@ def clamp_price(x: float) -> float:
     return max(0.0, min(1.0, float(x)))
 
 
+def kalshi_fee(qty: float, price: float) -> float:
+    """Taker fee estimate: 0.07 × qty × price × (1 − price)."""
+    return round(0.07 * qty * clamp_price(price) * (1.0 - clamp_price(price)), 4)
+
+
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
@@ -142,9 +150,30 @@ class Position(BaseModel):
     profit_armed: bool = False
 
 
+class BuyCandidate(BaseModel):
+    ticker: str
+    event_ticker: str
+    side: Side
+    strike: float
+    mid: float
+    spot: Optional[float] = None
+    distance: Optional[float] = None  # spot - strike for YES; strike - spot for NO
+    fee_per_contract: float = 0.0
+    fee_3_contracts: float = 0.0
+
+
+class SessionInfo(BaseModel):
+    start_balance: Optional[float] = None
+    current_balance: Optional[float] = None
+    realized_pl: float = 0.0
+    unrealized_pl: float = 0.0
+    net_pl: float = 0.0
+    net_pct: Optional[float] = None
+
+
 class RuntimeParams(BaseModel):
-    mode: str = "paper"          # "paper" or "live" — enforces execution gate
-    armed: bool = False           # global default arm state for new events
+    mode: str = "paper"
+    armed: bool = False
     poll_seconds: int = 3
 
     profit_harvest: Dict[str, float]
@@ -154,6 +183,10 @@ class RuntimeParams(BaseModel):
     time_risk: Dict[str, float]
     sources: Dict[str, Dict[str, Any]]
     safety: Dict[str, float] = Field(default_factory=lambda: {"global_drawdown_limit": -50.0})
+
+    max_deploy_pct: float = 0.50
+    entry_zone: Dict[str, float] = Field(default_factory=lambda: {"min": 0.70, "max": 0.80})
+    alert_thresholds: Dict[str, float] = Field(default_factory=lambda: {"position_drop_warning": 0.69})
 
 
 class PricePoint(BaseModel):
@@ -167,7 +200,7 @@ class PricePoint(BaseModel):
 class Action(BaseModel):
     ts: float
     severity: Literal["info", "warn", "danger"]
-    action: Literal["HOLD", "TRIM", "SELL_LEG", "SELL_ALL", "ALERT"]
+    action: Literal["HOLD", "TRIM", "SELL_LEG", "SELL_ALL", "ALERT", "BUY"]
     reason: str
     event_ticker: Optional[str] = None
     ticker: Optional[str] = None
@@ -209,6 +242,8 @@ class MultiStatus(BaseModel):
     actions: List[Action]
     params: RuntimeParams
     logs: List[str]
+    session: SessionInfo = Field(default_factory=SessionInfo)
+    buy_candidates: List[BuyCandidate] = Field(default_factory=list)
 
 
 class UpdateParamsRequest(BaseModel):
@@ -222,6 +257,17 @@ class UpdateParamsRequest(BaseModel):
     time_risk: Optional[Dict[str, float]] = None
     sources: Optional[Dict[str, Dict[str, Any]]] = None
     safety: Optional[Dict[str, float]] = None
+    max_deploy_pct: Optional[float] = None
+    entry_zone: Optional[Dict[str, float]] = None
+    alert_thresholds: Optional[Dict[str, float]] = None
+
+
+class BuyRequest(BaseModel):
+    ticker: str
+    side: Side
+    qty: int
+    limit_price_cents: int  # 1-99
+    confirm: bool = False
 
 
 class ArmEventRequest(BaseModel):
@@ -411,6 +457,58 @@ class KalshiClient:
         value = str(value).replace("$", "").strip()
         return float(value) if value else None
 
+    async def get_balance(self) -> Optional[float]:
+        path = "/trade-api/v2/portfolio/balance"
+        url = self.base_url + path
+        try:
+            r = requests.get(url, headers=self._auth_headers("GET", path), timeout=10)
+            if not r.ok:
+                return None
+            data = r.json()
+            bal = data.get("balance")
+            if bal is None:
+                return None
+            val = self._money_to_float(bal)
+            # Kalshi returns balance in cents (integer); convert to dollars
+            if val is not None and isinstance(bal, int) and bal > 200:
+                val = val / 100.0
+            return val
+        except Exception:
+            return None
+
+    async def get_open_markets_for_series(self, series_ticker: str) -> List[Dict]:
+        url = self.base_url + "/trade-api/v2/markets"
+        r = requests.get(
+            url,
+            params={"series_ticker": series_ticker, "status": "open", "limit": 200},
+            timeout=10,
+        )
+        r.raise_for_status()
+        return r.json().get("markets", [])
+
+    async def place_order(
+        self, ticker: str, side: Side, action: str, qty: int, limit_price: float
+    ) -> Dict[str, Any]:
+        """Place a buy or sell order. limit_price is in dollars (0.0–1.0)."""
+        path = "/trade-api/v2/portfolio/orders"
+        url = self.base_url + path
+        price_key = "yes_price" if side == "yes" else "no_price"
+        price_cents = max(1, min(99, round(limit_price * 100)))
+        payload = {
+            "ticker": ticker,
+            "action": action,
+            "side": side,
+            "count": int(qty),
+            "client_order_id": str(uuid.uuid4()),
+            "time_in_force": "fill_or_kill",
+            price_key: price_cents,
+        }
+        try:
+            r = requests.post(url, headers=self._auth_headers("POST", path), json=payload, timeout=10)
+            return {"ok": r.ok, "status_code": r.status_code, "response": r.json() if r.text else {}}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     async def get_portfolio_positions(self) -> List[Dict]:
         path = "/trade-api/v2/portfolio/positions"
         url = self.base_url + path
@@ -513,6 +611,7 @@ class EventEngine:
         self._logs = logs_queue
 
         self.positions: List[Position] = []
+        self.realized_pl: float = 0.0
         self.armed = armed
         self.state: BotState = "NORMAL" if armed else "OBSERVE_ONLY"
         self.last_prices: Dict[str, PricePoint] = {}
@@ -534,7 +633,7 @@ class EventEngine:
     def _add_action(
         self,
         severity: Literal["info", "warn", "danger"],
-        action: Literal["HOLD", "TRIM", "SELL_LEG", "SELL_ALL", "ALERT"],
+        action: Literal["HOLD", "TRIM", "SELL_LEG", "SELL_ALL", "ALERT", "BUY"],
         reason: str,
         ticker: Optional[str] = None,
         side: Optional[Side] = None,
@@ -663,7 +762,6 @@ class EventEngine:
         self._check_endangered()
         self._detect_shock()
         self._classify_shock()
-        self._profit_harvest()
         self._structure_drift()
         self._time_risk()
 
@@ -711,8 +809,7 @@ class EventEngine:
             return
         if elapsed_min >= recovery_window:
             self.state = "REGIME_BREAK"
-            self._add_action("danger", "ALERT", f"Regime break: recovery only {recovery:.2f}% after {elapsed_min:.1f} min.")
-            self._exit_endangered_legs("Regime break confirmed after shock failed to recover.")
+            self._add_action("danger", "ALERT", f"Regime break: recovery only {recovery:.2f}% after {elapsed_min:.1f} min. Review positions.")
 
     def _clear_shock(self) -> None:
         self.shock_start_ts = None
@@ -741,8 +838,7 @@ class EventEngine:
                     asyncio.create_task(self._execute_sell(p, p.count))
 
     def _check_endangered(self) -> None:
-        """Proactive per-tick stop-loss: exits any leg whose consensus has crossed its strike buffer.
-        Runs every tick and keeps retrying until count reaches 0."""
+        """Per-tick stop-loss: exits any leg whose consensus has crossed its strike buffer."""
         consensus = self.consensus_price()
         if consensus is None:
             return
@@ -751,49 +847,16 @@ class EventEngine:
                 continue
             if self.position_endangered(p, consensus):
                 self.state = "FLATTENING"
-                self._add_action(
-                    "danger", "SELL_LEG",
-                    f"Stop-loss: consensus {consensus:.2f} past strike buffer ({p.side.upper()} T{p.strike})",
-                    p.ticker, p.side, p.count,
+                sell_price = p.current_bid or p.current_mid
+                fee = kalshi_fee(p.count, sell_price)
+                reason = (
+                    f"Stop-loss: {p.side.upper()} T{p.strike} endangered — "
+                    f"consensus {consensus:.2f}, sell ~{sell_price:.2f}, "
+                    f"est. fee ${fee:.3f}"
                 )
+                self._add_action("danger", "SELL_LEG", reason, p.ticker, p.side, p.count)
                 if self.params.mode == "live" and self.armed:
                     asyncio.create_task(self._execute_sell(p, p.count))
-
-    def _profit_harvest(self) -> None:
-        ph = self.params.profit_harvest
-        for p in self.positions:
-            if p.count <= 0:
-                continue
-            mid = p.current_bid or p.current_mid
-            if mid >= ph.get("arm_at", 0.88):
-                p.profit_armed = True
-            if not p.profit_armed:
-                continue
-            peak = p.peak_mid
-            trail = ph.get("trail_after_90", 0.03) if peak >= 0.90 else ph.get("trail_after_arm", 0.04)
-            if mid >= ph.get("full_exit_at", 0.96):
-                qty = p.count
-                self._add_action("info", "SELL_LEG", f"Full profit exit: {mid:.2f} >= full_exit_at.", p.ticker, p.side, qty)
-                if self.params.mode == "live" and self.armed:
-                    asyncio.create_task(self._execute_sell(p, qty))
-                continue
-            if mid >= ph.get("second_trim_at", 0.93):
-                qty = round(p.count * ph.get("second_trim_fraction", 0.33), 6)
-                self._add_action("info", "TRIM", f"Second profit trim: {mid:.2f} >= second_trim_at.", p.ticker, p.side, qty)
-                if self.params.mode == "live" and self.armed:
-                    asyncio.create_task(self._execute_sell(p, qty))
-                continue
-            if mid >= ph.get("first_trim_at", 0.90):
-                qty = round(p.count * ph.get("first_trim_fraction", 0.33), 6)
-                self._add_action("info", "TRIM", f"First profit trim: {mid:.2f} >= first_trim_at.", p.ticker, p.side, qty)
-                if self.params.mode == "live" and self.armed:
-                    asyncio.create_task(self._execute_sell(p, qty))
-                continue
-            if peak >= ph.get("arm_at", 0.88) and mid <= peak - trail:
-                qty = round(p.count * ph.get("first_trim_fraction", 0.33), 6)
-                self._add_action("warn", "TRIM", f"Trailing stop: {mid:.2f} fell from peak {peak:.2f}.", p.ticker, p.side, qty)
-                if self.params.mode == "live" and self.armed:
-                    asyncio.create_task(self._execute_sell(p, qty))
 
     def _structure_drift(self) -> None:
         yes = sum(p.count for p in self.positions if p.side == "yes")
@@ -820,7 +883,7 @@ class EventEngine:
     # Execution
     # -----------------------------------------------------------------------
 
-    async def _execute_sell(self, p: Position, qty: int) -> None:
+    async def _execute_sell(self, p: Position, qty: float) -> None:
         if qty <= 0 or p.count <= 0:
             return
         if self.params.mode != "live":
@@ -830,8 +893,10 @@ class EventEngine:
         bid = p.current_bid or p.current_mid
         result = await self.kalshi.sell_position(p.ticker, p.side, qty, bid=bid)
         if result.get("ok"):
+            pl = qty * (bid - p.avg_price)
+            self.realized_pl += pl
             p.count -= qty
-            self.log(f"SOLD {qty} {p.side.upper()} {p.ticker}")
+            self.log(f"SOLD {qty} {p.side.upper()} {p.ticker} @ ~{bid:.3f}  P/L: {pl:+.2f}")
         else:
             self.log(f"SELL FAILED {p.ticker}: {result}")
 
@@ -965,7 +1030,14 @@ class Engine:
         )
 
         self.event_engines: Dict[str, EventEngine] = {}
-        self._safety_triggered = False  # prevents re-firing kill switch every tick
+        self._safety_triggered = False
+
+        # Session tracking
+        self.session_start_balance: Optional[float] = None
+        self.session_realized_pl: float = 0.0  # accumulates from closed event engines
+        self._balance_cache: Optional[float] = None
+        self._balance_cache_ts: float = 0.0
+        self._load_session()
 
         # Bootstrap from config positions (bootstrap survives even if portfolio sync fails).
         if config.get("event_ticker") and config.get("positions"):
@@ -992,6 +1064,143 @@ class Engine:
         engine.positions = positions
         self.event_engines[event_ticker] = engine
         self.log(f"Bootstrap: loaded {len(positions)} config positions for {event_ticker}")
+
+    def _load_session(self) -> None:
+        today = datetime.now().strftime("%Y-%m-%d")
+        if SESSION_PATH.exists():
+            try:
+                data = json.loads(SESSION_PATH.read_text())
+                if data.get("date") == today:
+                    self.session_start_balance = data.get("start_balance")
+                    self.session_realized_pl = float(data.get("realized_pl", 0.0))
+                    return
+            except Exception:
+                pass
+        self.session_start_balance = None
+        self.session_realized_pl = 0.0
+
+    def _save_session(self) -> None:
+        try:
+            SESSION_PATH.write_text(json.dumps({
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "start_balance": self.session_start_balance,
+                "realized_pl": self.session_realized_pl,
+            }, indent=2))
+        except Exception as e:
+            self.log(f"Session save failed: {e}")
+
+    async def _refresh_balance(self) -> None:
+        if not self.kalshi.api_key_id:
+            return
+        now = now_ts()
+        if now - self._balance_cache_ts < 60:
+            return
+        try:
+            bal = await self.kalshi.get_balance()
+            if bal is not None:
+                self._balance_cache = bal
+                self._balance_cache_ts = now
+                if self.session_start_balance is None:
+                    self.session_start_balance = bal
+                    self._save_session()
+        except Exception as e:
+            self.log(f"Balance refresh failed: {e}")
+
+    async def scan_buy_candidates(self) -> List[BuyCandidate]:
+        zone_min = self.params.entry_zone.get("min", 0.70)
+        zone_max = self.params.entry_zone.get("max", 0.80)
+
+        # Spot price per instrument prefix from active engines
+        spot_by_prefix: Dict[str, Optional[float]] = {}
+        for et, eng in self.event_engines.items():
+            prefix = instrument_prefix(et)
+            if prefix not in spot_by_prefix:
+                spot_by_prefix[prefix] = eng.consensus_price()
+
+        candidates: List[BuyCandidate] = []
+        for prefix, spot in spot_by_prefix.items():
+            try:
+                markets = await self.kalshi.get_open_markets_for_series(prefix)
+            except Exception as e:
+                self.log(f"Buy scan {prefix}: {e}")
+                continue
+            for m in markets:
+                ticker = m.get("ticker", "")
+                if not ticker or "-T" not in ticker:
+                    continue
+                event_ticker = ticker.split("-T")[0]
+                try:
+                    strike = float(ticker.split("-T")[-1])
+                except Exception:
+                    continue
+                yes_bid = self.kalshi._money_to_float(m.get("yes_bid_dollars"))
+                yes_ask = self.kalshi._money_to_float(m.get("yes_ask_dollars"))
+                no_bid  = self.kalshi._money_to_float(m.get("no_bid_dollars"))
+                no_ask  = self.kalshi._money_to_float(m.get("no_ask_dollars"))
+
+                if yes_bid is not None and yes_ask is not None:
+                    yes_mid = (yes_bid + yes_ask) / 2
+                    if zone_min <= yes_mid <= zone_max:
+                        dist = round(spot - strike, 2) if spot is not None else None
+                        candidates.append(BuyCandidate(
+                            ticker=ticker, event_ticker=event_ticker, side="yes",
+                            strike=strike, mid=round(yes_mid, 3),
+                            spot=round(spot, 2) if spot is not None else None,
+                            distance=dist,
+                            fee_per_contract=kalshi_fee(1, yes_mid),
+                            fee_3_contracts=kalshi_fee(3, yes_mid),
+                        ))
+                if no_bid is not None and no_ask is not None:
+                    no_mid = (no_bid + no_ask) / 2
+                    if zone_min <= no_mid <= zone_max:
+                        dist = round(strike - spot, 2) if spot is not None else None
+                        candidates.append(BuyCandidate(
+                            ticker=ticker, event_ticker=event_ticker, side="no",
+                            strike=strike, mid=round(no_mid, 3),
+                            spot=round(spot, 2) if spot is not None else None,
+                            distance=dist,
+                            fee_per_contract=kalshi_fee(1, no_mid),
+                            fee_3_contracts=kalshi_fee(3, no_mid),
+                        ))
+
+        candidates.sort(key=lambda c: abs(c.distance) if c.distance is not None else 9999)
+        return candidates[:20]
+
+    async def execute_buy(self, ticker: str, side: Side, qty: int, limit_price_cents: int) -> Dict:
+        limit_price = limit_price_cents / 100.0
+        cost = qty * limit_price
+
+        if self._balance_cache is not None:
+            max_invest = self._balance_cache * self.params.max_deploy_pct
+            current_deployed = sum(
+                p.count * p.avg_price
+                for e in self.event_engines.values()
+                for p in e.positions
+            )
+            if current_deployed + cost > max_invest:
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Bankroll cap: ${current_deployed:.2f} deployed, "
+                        f"adding ${cost:.2f} exceeds {self.params.max_deploy_pct*100:.0f}% "
+                        f"of ${self._balance_cache:.2f} balance"
+                    ),
+                }
+
+        fee = kalshi_fee(qty, limit_price)
+        if self.params.mode != "live":
+            msg = f"PAPER BUY: {qty} {side.upper()} {ticker} @ {limit_price_cents}¢  est.fee ${fee:.3f}"
+            self.log(msg)
+            self._add_action("info", "BUY", msg)
+            return {"ok": True, "paper": True}
+
+        result = await self.kalshi.place_order(ticker, side, "buy", qty, limit_price)
+        if result.get("ok"):
+            self.log(f"BOUGHT {qty} {side.upper()} {ticker} @ {limit_price_cents}¢  fee ~${fee:.3f}")
+            self._add_action("info", "BUY", f"Bought {qty} {side.upper()} {ticker} @ {limit_price_cents}¢")
+        else:
+            self.log(f"BUY FAILED {ticker}: {result}")
+        return result
 
     @staticmethod
     def _parse_dt(value: Optional[str]) -> Optional[datetime]:
@@ -1114,6 +1323,8 @@ class Engine:
         # Remove engines whose event no longer has open positions.
         stale = [et for et in list(self.event_engines) if et not in live]
         for et in stale:
+            self.session_realized_pl += self.event_engines[et].realized_pl
+            self._save_session()
             self.log(f"Event closed/removed: {et}")
             del self.event_engines[et]
 
@@ -1146,6 +1357,7 @@ class Engine:
 
     async def tick(self) -> None:
         await self.sync_positions()
+        await self._refresh_balance()
         for eng in list(self.event_engines.values()):
             await eng.update_prices()
             eng.evaluate_state_machine()
@@ -1166,6 +1378,20 @@ class Engine:
     # -----------------------------------------------------------------------
 
     def status(self) -> MultiStatus:
+        snapshots = [e.risk_snapshot() for e in self.event_engines.values()]
+        unrealized = sum(s.unrealized_pl for s in snapshots)
+        realized = self.session_realized_pl + sum(e.realized_pl for e in self.event_engines.values())
+        net = realized + unrealized
+        start = self.session_start_balance
+        net_pct = round(net / start * 100.0, 2) if start else None
+        session = SessionInfo(
+            start_balance=round(start, 2) if start is not None else None,
+            current_balance=round(self._balance_cache, 2) if self._balance_cache is not None else None,
+            realized_pl=round(realized, 2),
+            unrealized_pl=round(unrealized, 2),
+            net_pl=round(net, 2),
+            net_pct=net_pct,
+        )
         return MultiStatus(
             ts=now_ts(),
             mode=self.params.mode,
@@ -1173,6 +1399,7 @@ class Engine:
             actions=list(self.actions),
             params=self.params,
             logs=list(self.logs),
+            session=session,
         )
 
     def update_params(self, req: UpdateParamsRequest) -> None:
@@ -1180,7 +1407,7 @@ class Engine:
         for key, value in data.items():
             if value is None:
                 continue
-            if key in ("mode", "armed", "poll_seconds"):
+            if key in ("mode", "armed", "poll_seconds", "max_deploy_pct"):
                 setattr(self.params, key, value)
             else:
                 current = getattr(self.params, key)
@@ -1283,6 +1510,43 @@ async def api_sell_leg(req: SellRequest):
     if not req.ticker:
         raise HTTPException(status_code=400, detail="ticker required")
     return await engine.sell_leg(req.ticker, req.qty, req.confirm)
+
+
+@app.get("/api/buy_candidates")
+async def api_buy_candidates():
+    candidates = await engine.scan_buy_candidates()
+    return {"candidates": [c.model_dump() for c in candidates]}
+
+
+@app.post("/api/execute_buy")
+async def api_execute_buy(req: BuyRequest):
+    if not req.confirm:
+        raise HTTPException(status_code=400, detail="confirm=true required")
+    return await engine.execute_buy(req.ticker, req.side, req.qty, req.limit_price_cents)
+
+
+@app.get("/api/session")
+async def api_session():
+    s = engine.status().session
+    return s.model_dump()
+
+
+@app.get("/api/debug/balance")
+async def api_debug_balance():
+    k = engine.kalshi
+    if not k.api_key_id:
+        return {"error": "No API credentials configured"}
+    path = "/trade-api/v2/portfolio/balance"
+    url = k.base_url + path
+    try:
+        r = requests.get(url, headers=k._auth_headers("GET", path), timeout=10)
+        try:
+            body = r.json()
+        except Exception:
+            body = r.text[:500]
+        return {"url": url, "status_code": r.status_code, "body": body, "cached": engine._balance_cache}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.get("/api/debug/goldprice")

@@ -1,49 +1,99 @@
-mode: "paper"     # "paper" = log only, "live" = real orders when event is armed
-
-event_ticker: KXBRENTW-26MAY0117     # bootstrap event (used if portfolio sync is unavailable)
-settlement_time: "2026-05-30T15:00:00-04:00"
+mode: "paper"     # "paper" = log actions only   "live" = real orders when event is armed
+armed: false      # arm new events by default; toggle per-event in the UI
+poll_seconds: 3
 
 api:
-  key_id: "KEY-ID-FROM-KALSHI"
+  key_id: "YOUR-KEY-ID-FROM-KALSHI"
   private_key_path: "your-key-file.txt"
   base_url: "https://api.elections.kalshi.com"
 
-armed: false
-poll_seconds: 3
+# Bootstrap: pre-load positions if the Kalshi portfolio sync hasn't returned yet.
+# Leave blank once you trust live sync (portfolio is refreshed every poll cycle).
+event_ticker: ""
+settlement_time: ""
+positions: []
+
+# ---------------------------------------------------------------------------
+# Safety
+# ---------------------------------------------------------------------------
 
 safety:
-  global_drawdown_limit: -50.00     # flatten all if total unrealized P/L drops below this
-   
-# External price sources. Disable any source that becomes unreliable.
+  global_drawdown_limit: -50.0    # alert when session net P/L falls below this % of start balance
+                                  # (alert only — use SELL EVERYTHING button to act)
+
+# ---------------------------------------------------------------------------
+# Buy-side
+# ---------------------------------------------------------------------------
+
+max_deploy_pct: 0.50    # max fraction of balance to deploy at once (0.50 = 50%)
+
+entry_zone:
+  min: 0.70    # lowest YES/NO mid to consider buying (below → collapse risk)
+  max: 0.80    # highest mid to buy (above → compressed upside)
+
+alert_thresholds:
+  position_drop_warning: 0.69    # warn when a held position mid falls to this level
+
+# ---------------------------------------------------------------------------
+# Price sources
+# Disable any source that becomes unreliable.  Gold events use the goldprice
+# source instead of oilprice (detected automatically by instrument prefix).
+# ---------------------------------------------------------------------------
+
 sources:
   oilprice:
     enabled: true
-    color: "#2563eb"
     min_refresh_seconds: 15
-    symbol: "WTI-Crude" 
+    symbol: "WTI-Crude"        # used for WTI/Brent events
   yahoo:
     enabled: true
-    color: "#16a34a"
-    symbol: "BZ=F"
     min_refresh_seconds: 60
+    symbol: "CL=F"             # overridden per-event by instrument map (BZ=F, GC=F, NG=F, …)
   kalshi_implied:
     enabled: true
-    color: "#f97316"
     min_refresh_seconds: 3
 
-# Position rows can be edited in the UI at runtime too.
-positions:
-  - ticker: "KXBRENTW-26MAY0117-T109.99"
-    side: "yes"
-    strike: 109.99
-    count: 10
-    avg_price: 0.7350
+# ---------------------------------------------------------------------------
+# Shock detection  (display + state machine — no auto-sell on regime break)
+# ---------------------------------------------------------------------------
 
-  - ticker: "KXBRENTW-26MAY0117-T113.99"
-    side: "no"
-    strike: 113.99
-    count: 10
-    avg_price: 0.6960
+shock_logic:
+  shock_threshold_pct: 2.0          # % move in shock_window_minutes that triggers SHOCK_WATCH
+  shock_window_minutes: 10
+  recovery_window_minutes: 15       # time to recover before state → REGIME_BREAK
+  min_recovery_pct: 0.75            # minimum rebound % to confirm recovery
+  hard_break_confirm_minutes: 15
+
+# ---------------------------------------------------------------------------
+# Source consensus
+# ---------------------------------------------------------------------------
+
+source_consensus:
+  stale_after_seconds: 90           # mark a price feed stale after this many seconds
+  max_external_disagreement: 1.50   # informational only
+  kalshi_lag_threshold: 1.00        # informational only
+
+# ---------------------------------------------------------------------------
+# Structure  (strike buffer for endangered-position stop-loss)
+# ---------------------------------------------------------------------------
+
+structure:
+  lower_boundary_buffer: 0.75    # YES exits when consensus < strike + buffer
+  upper_boundary_buffer: 0.75    # NO  exits when consensus > strike - buffer
+  max_yes_no_imbalance: 1.75     # ratio alert (informational)
+  min_table_width: 4.00          # informational
+
+# ---------------------------------------------------------------------------
+# Time risk  (exits endangered legs near settlement)
+# ---------------------------------------------------------------------------
+
+time_risk:
+  flatten_unstable_under_minutes: 60    # sell endangered legs if < this many minutes remain
+  tighten_under_hours: 3                # informational
+
+# ---------------------------------------------------------------------------
+# profit_harvest  (kept for config compatibility — logic is disabled)
+# ---------------------------------------------------------------------------
 
 profit_harvest:
   arm_at: 0.88
@@ -54,27 +104,3 @@ profit_harvest:
   trail_after_90: 0.03
   first_trim_fraction: 0.33
   second_trim_fraction: 0.33
-
-shock_logic:
-  shock_threshold_pct: 2.0
-  shock_window_minutes: 10
-  recovery_window_minutes: 15
-  min_recovery_pct: 0.75
-  hard_break_confirm_minutes: 15
-
-source_consensus:
-  max_external_disagreement: 1.50
-  kalshi_lag_threshold: 1.00
-  stale_after_seconds: 90
-
-structure:
-  max_yes_no_imbalance: 1.75
-  min_table_width: 4.00
-  lower_boundary_buffer: 0.75
-  upper_boundary_buffer: 0.75
-
-time_risk:
-  tighten_under_hours: 3
-  flatten_unstable_under_minutes: 60
-
-# Execution is governed by `mode` (paper/live) + per-event arm toggle in the UI.

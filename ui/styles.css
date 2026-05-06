@@ -53,6 +53,13 @@ main { padding: 18px; }
 }
 .header-actions { display: flex; gap: 16px; align-items: center; }
 .header-pl { text-align: right; line-height: 1.2; }
+.header-scoreboard {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
 
 /* Buttons */
 button {

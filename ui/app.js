@@ -233,14 +233,18 @@ function toggleSettlement(et) {
 function renderStatus(status) {
   latestStatus = status;
 
-  // Total P/L across all events
-  const totalPL = Object.values(status.events).reduce((sum, es) => sum + (es.risk?.unrealized_pl ?? 0), 0);
-  const plEl = document.getElementById("headerPL");
-  if (plEl) {
-    plEl.textContent = fmtMoney(totalPL);
-    plEl.className = "big " + clsPL(totalPL);
-    plEl.style.fontSize = "20px";
-  }
+  // Session scoreboard
+  const s = status.session || {};
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set("sbStart",      s.start_balance != null ? "$" + s.start_balance.toFixed(2) : "—");
+  set("sbCash",       s.current_balance != null ? "$" + s.current_balance.toFixed(2) : "—");
+  const rlzEl = document.getElementById("sbRealized");
+  if (rlzEl) { rlzEl.textContent = fmtMoney(s.realized_pl); rlzEl.className = clsPL(s.realized_pl); }
+  const urlzEl = document.getElementById("sbUnrealized");
+  if (urlzEl) { urlzEl.textContent = fmtMoney(s.unrealized_pl); urlzEl.className = clsPL(s.unrealized_pl); }
+  const netEl = document.getElementById("sbNet");
+  if (netEl) { netEl.textContent = fmtMoney(s.net_pl); netEl.className = clsPL(s.net_pl); }
+  set("sbPct", s.net_pct != null ? `(${s.net_pct > 0 ? "+" : ""}${s.net_pct.toFixed(1)}%)` : "");
 
   // Mode badge
   const badge = document.getElementById("modeBadge");
@@ -280,10 +284,10 @@ function renderStatus(status) {
     document.getElementById("pollSeconds").value = status.params.poll_seconds;
     document.getElementById("shockThreshold").value = status.params.shock_logic.shock_threshold_pct;
     document.getElementById("minRecovery").value = status.params.shock_logic.min_recovery_pct;
-    document.getElementById("armAt").value = status.params.profit_harvest.arm_at;
-    document.getElementById("firstTrim").value = status.params.profit_harvest.first_trim_at;
-    document.getElementById("trailAfter90").value = status.params.profit_harvest.trail_after_90;
     document.getElementById("drawdownLimit").value = status.params.safety?.global_drawdown_limit ?? -100;
+    document.getElementById("maxDeployPct").value = status.params.max_deploy_pct ?? 0.50;
+    document.getElementById("entryZoneMin").value = status.params.entry_zone?.min ?? 0.70;
+    document.getElementById("entryZoneMax").value = status.params.entry_zone?.max ?? 0.80;
 
     ["oilprice", "yahoo", "kalshi_implied"].forEach((name) => {
       const el = document.getElementById("src_" + name);
@@ -368,13 +372,13 @@ async function saveParams() {
       shock_threshold_pct: Number(document.getElementById("shockThreshold").value),
       min_recovery_pct: Number(document.getElementById("minRecovery").value),
     },
-    profit_harvest: {
-      arm_at: Number(document.getElementById("armAt").value),
-      first_trim_at: Number(document.getElementById("firstTrim").value),
-      trail_after_90: Number(document.getElementById("trailAfter90").value),
-    },
     safety: {
       global_drawdown_limit: Number(document.getElementById("drawdownLimit").value),
+    },
+    max_deploy_pct: Number(document.getElementById("maxDeployPct").value),
+    entry_zone: {
+      min: Number(document.getElementById("entryZoneMin").value),
+      max: Number(document.getElementById("entryZoneMax").value),
     },
   });
   await refresh();
@@ -386,6 +390,67 @@ async function setMode(mode) {
     : "Switch to PAPER mode?";
   if (!confirm(msg)) return;
   await postJSON("/api/params", { mode });
+  await refresh();
+}
+
+// ---------------------------------------------------------------------------
+// Buy candidates
+// ---------------------------------------------------------------------------
+
+async function refreshCandidates() {
+  const container = document.getElementById("candidatesContainer");
+  container.innerHTML = '<span class="muted">Scanning...</span>';
+  try {
+    const r = await fetch("/api/buy_candidates");
+    const data = await r.json();
+    renderCandidates(data.candidates || []);
+  } catch (e) {
+    container.innerHTML = `<span class="negative">Error: ${e}</span>`;
+  }
+}
+
+function renderCandidates(candidates) {
+  const container = document.getElementById("candidatesContainer");
+  if (!candidates.length) {
+    container.innerHTML = '<span class="muted">No candidates in entry zone.</span>';
+    return;
+  }
+  let html = `<table><tr>
+    <th>Ticker</th><th>Side</th><th>Strike</th><th>Mid</th>
+    <th>Spot</th><th>Distance</th><th>Fee×1</th><th>Fee×3</th><th></th>
+  </tr>`;
+  candidates.forEach((c) => {
+    const dist = c.distance != null ? (c.distance >= 0 ? "+" : "") + c.distance.toFixed(2) : "—";
+    const distCls = c.distance != null && c.distance >= 0 ? "positive" : "negative";
+    html += `<tr>
+      <td>${c.ticker.split("-T")[1] ? c.event_ticker : c.ticker}</td>
+      <td>${c.side.toUpperCase()}</td>
+      <td>${fmt(c.strike)}</td>
+      <td><b>${fmt(c.mid, 3)}</b></td>
+      <td>${c.spot != null ? fmt(c.spot) : "—"}</td>
+      <td class="${distCls}">${dist}</td>
+      <td class="muted">$${c.fee_per_contract.toFixed(3)}</td>
+      <td class="muted">$${c.fee_3_contracts.toFixed(3)}</td>
+      <td><button class="small" onclick="promptBuy('${c.ticker}','${c.side}',${c.mid})">Buy</button></td>
+    </tr>`;
+  });
+  html += "</table>";
+  container.innerHTML = html;
+}
+
+async function promptBuy(ticker, side, mid) {
+  const limitCents = prompt(
+    `Buy ${side.toUpperCase()} ${ticker}\nMid: ${(mid * 100).toFixed(1)}¢\nEnter limit price in CENTS (1-99):`,
+    Math.round(mid * 100)
+  );
+  if (limitCents === null) return;
+  const qty = prompt("How many contracts?", "3");
+  if (qty === null) return;
+  if (!confirm(`Confirm: Buy ${qty} ${side.toUpperCase()} ${ticker} @ ${limitCents}¢`)) return;
+  const r = await postJSON("/api/execute_buy", {
+    ticker, side, qty: Number(qty), limit_price_cents: Number(limitCents), confirm: true,
+  });
+  alert(r.ok ? (r.paper ? "PAPER order logged." : "Order placed!") : `Error: ${r.error || JSON.stringify(r)}`);
   await refresh();
 }
 
