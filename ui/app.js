@@ -152,18 +152,21 @@ function renderEventStatus(et, es) {
   const readout = document.getElementById("readout_" + id);
   if (readout) {
     readout.innerHTML = es.prices.map((p) => {
-      const stale = p.stale ? ` <span class="negative">STALE</span>` : "";
-      const err = p.error ? ` <span class="negative">(${p.error.slice(0, 80)})</span>` : "";
-      return `<span><b>${p.source}</b>: ${fmt(p.price, 2)}${stale}${err}</span>`;
+      const stale   = p.stale   ? ` <span class="negative">STALE</span>`   : "";
+      const outlier = p.outlier ? ` <span class="negative">OUTLIER</span>` : "";
+      const err     = p.error   ? ` <span class="negative">(${p.error.slice(0, 80)})</span>` : "";
+      const cls     = p.outlier ? " style=\"opacity:0.45\"" : "";
+      return `<span${cls}><b>${p.source}</b>: ${fmt(p.price, 2)}${stale}${outlier}${err}</span>`;
     }).join("");
   }
 
   // Positions table
   const posTable = document.getElementById("positions_" + id);
   if (posTable) {
-    let html = `<tr><th>Ticker</th><th>Side</th><th>Strike</th><th>Count</th><th>Avg</th><th>Bid</th><th>Mid</th><th>Peak</th><th>P/L</th><th></th></tr>`;
+    let html = `<tr><th>Ticker</th><th>Side</th><th>Strike</th><th>Count</th><th>Avg</th><th>Bid</th><th>Mid</th><th>Peak</th><th>P/L</th><th colspan="3">Sell</th></tr>`;
     es.positions.forEach((p) => {
       const pl = p.count * ((p.current_bid || p.current_mid) - p.avg_price);
+      const midCents = Math.round((p.current_bid || p.current_mid) * 100);
       html += `<tr>
         <td>${p.ticker}</td>
         <td>${p.side.toUpperCase()}</td>
@@ -174,7 +177,9 @@ function renderEventStatus(et, es) {
         <td>${fmt(p.current_mid, 2)}</td>
         <td>${fmt(p.peak_mid, 2)}</td>
         <td class="${clsPL(pl)}">${fmtMoney(pl)}</td>
-        <td><button class="small" onclick="sellLeg('${p.ticker}')">Sell</button></td>
+        <td><button class="small danger" title="Sell immediately at any price (IOC)" onclick="sellLeg('${p.ticker}')">Now</button></td>
+        <td><button class="small muted-btn" title="Place a day limit order at a specific price" onclick="sellLegLimit('${p.ticker}', ${midCents})">Limit</button></td>
+        <td><button class="small muted-btn" title="Auto-reprice 1¢ below best ask every 30s until filled" onclick="sellLegAdjusted('${p.ticker}')">Auto</button></td>
       </tr>`;
     });
     posTable.innerHTML = html;
@@ -353,8 +358,37 @@ async function sellAll() {
 }
 
 async function sellLeg(ticker) {
-  if (!confirm("Confirm sell leg: " + ticker + "?")) return;
+  if (!confirm(`Confirm: sell ${ticker} immediately at market price (IOC)?`)) return;
   await postJSON("/api/sell_leg", { ticker, confirm: true });
+  await refresh();
+}
+
+async function sellLegLimit(ticker, suggestedCents) {
+  const cents = prompt(
+    `Limit sell ${ticker}\nEnter your limit price in CENTS (1–99):\n(Current mid ~${suggestedCents}¢)`,
+    suggestedCents
+  );
+  if (cents === null) return;
+  if (!confirm(`Place day limit sell: ${ticker} @ ${cents}¢?`)) return;
+  const r = await postJSON("/api/sell_leg_limit", {
+    ticker, limit_price_cents: Number(cents), confirm: true,
+  });
+  if (r.ok || r.paper) {
+    alert(r.paper ? "PAPER: limit sell logged." : `Limit sell placed. Order ID: ${r.order_id || "?"}`);
+  } else {
+    alert(`Failed: ${r.error || JSON.stringify(r)}`);
+  }
+  await refresh();
+}
+
+async function sellLegAdjusted(ticker) {
+  if (!confirm(
+    `Start adjusted limit sell for ${ticker}?\n\n` +
+    `Will reprice 1¢ below best ask every 30 seconds until filled.\n` +
+    `Runs in background — check logs for progress.`
+  )) return;
+  const r = await postJSON("/api/sell_leg_adjusted", { ticker, confirm: true });
+  alert(r.started ? "Adjusted limit sell started — watch the Logs panel." : `Error: ${JSON.stringify(r)}`);
   await refresh();
 }
 

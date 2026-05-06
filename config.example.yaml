@@ -70,7 +70,9 @@ shock_logic:
 
 source_consensus:
   stale_after_seconds: 90           # mark a price feed stale after this many seconds
-  max_external_disagreement: 1.50   # informational only
+  max_external_disagreement: 3.0    # % deviation from group median before a source is flagged
+                                    # OUTLIER and excluded from consensus. kalshi_implied is
+                                    # always included as a reference vote but never excluded.
   kalshi_lag_threshold: 1.00        # informational only
 
 # ---------------------------------------------------------------------------

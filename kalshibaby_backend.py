@@ -194,6 +194,7 @@ class PricePoint(BaseModel):
     price: Optional[float]
     ts: float
     stale: bool = False
+    outlier: bool = False   # excluded from consensus due to large disagreement with other sources
     error: Optional[str] = None
 
 
@@ -279,6 +280,20 @@ class SellRequest(BaseModel):
     ticker: Optional[str] = None
     event_ticker: Optional[str] = None
     qty: Optional[float] = None
+    confirm: bool = False
+
+
+class LimitSellRequest(BaseModel):
+    ticker: str
+    qty: Optional[float] = None
+    limit_price_cents: int   # 1–99
+    confirm: bool = False
+
+
+class AdjustedSellRequest(BaseModel):
+    ticker: str
+    qty: Optional[float] = None
+    recheck_seconds: int = 30
     confirm: bool = False
 
 
@@ -564,6 +579,7 @@ class KalshiClient:
         return bid, ask, mid
 
     async def sell_position(self, ticker: str, side: Side, qty: float, bid: float = 0.0) -> Dict[str, Any]:
+        """IOC sell at any price (floor = 1¢). Fills immediately or cancels."""
         path = "/trade-api/v2/portfolio/orders"
         url = self.base_url + path
         if qty % 1 != 0:
@@ -582,6 +598,43 @@ class KalshiClient:
         try:
             r = requests.post(url, headers=self._auth_headers("POST", path), json=payload, timeout=10)
             return {"ok": r.ok, "status_code": r.status_code, "response": r.json() if r.text else {}}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    async def sell_position_limit(
+        self, ticker: str, side: Side, qty: float, limit_price: float
+    ) -> Dict[str, Any]:
+        """Day-order limit sell at an exact price. Stays open until filled or market close."""
+        path = "/trade-api/v2/portfolio/orders"
+        url = self.base_url + path
+        if qty % 1 != 0:
+            return {"ok": False, "error": f"Fractional position ({qty}) cannot be sold via API."}
+        price_key = "yes_price" if side == "yes" else "no_price"
+        price_cents = max(1, min(99, round(limit_price * 100)))
+        payload = {
+            "ticker": ticker,
+            "action": "sell",
+            "side": side,
+            "count": int(qty),
+            "client_order_id": str(uuid.uuid4()),
+            "time_in_force": "day",
+            "reduce_only": True,
+            price_key: price_cents,
+        }
+        try:
+            r = requests.post(url, headers=self._auth_headers("POST", path), json=payload, timeout=10)
+            resp = r.json() if r.text else {}
+            order_id = resp.get("order", {}).get("order_id") or resp.get("order_id")
+            return {"ok": r.ok, "status_code": r.status_code, "order_id": order_id, "response": resp}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    async def cancel_order(self, order_id: str) -> Dict[str, Any]:
+        path = f"/trade-api/v2/portfolio/orders/{order_id}"
+        url = self.base_url + path
+        try:
+            r = requests.delete(url, headers=self._auth_headers("DELETE", path), timeout=10)
+            return {"ok": r.ok, "status_code": r.status_code}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
@@ -707,7 +760,10 @@ class EventEngine:
         t = now_ts()
         for pp in results:
             pp.stale = (t - pp.ts) > stale_after or pp.price is None
+            pp.outlier = False  # reset; _detect_outliers will re-set if needed
             self.last_prices[pp.source] = pp
+
+        self._detect_outliers()
 
         consensus = self.consensus_price()
         if consensus is not None:
@@ -725,10 +781,48 @@ class EventEngine:
             p.current_mid = clamp_price(mid)
             p.peak_mid = max(p.peak_mid, p.current_mid)
 
+    def _detect_outliers(self) -> None:
+        """Flag price sources that disagree significantly with the group median.
+        kalshi_implied participates as a vote for detecting outliers but is never
+        flagged as an outlier itself — it's used as a tiebreaker when external
+        sources disagree (e.g. one source stuck on a stale value)."""
+        # Collect all valid (non-stale) prices including kalshi_implied as a reference vote
+        candidates = {
+            name: pp for name, pp in self.last_prices.items()
+            if pp.price is not None and not pp.stale
+        }
+        if len(candidates) < 2:
+            return  # can't detect outliers with fewer than 2 sources
+
+        all_prices = sorted(pp.price for pp in candidates.values())
+        n = len(all_prices)
+        median = all_prices[n // 2] if n % 2 else (all_prices[n // 2 - 1] + all_prices[n // 2]) / 2
+        if median <= 0:
+            return
+
+        threshold_pct = self.params.source_consensus.get("max_external_disagreement", 3.0)
+        for name, pp in candidates.items():
+            if name == "kalshi_implied":
+                continue  # kalshi_implied is the tiebreaker, never an outlier
+            deviation = abs(pp.price - median) / median * 100
+            was_outlier = pp.outlier
+            pp.outlier = deviation > threshold_pct
+            if pp.outlier and not was_outlier:
+                self._add_action(
+                    "warn", "ALERT",
+                    f"OUTLIER: {name} = {pp.price:.2f} deviates {deviation:.1f}% from "
+                    f"group median {median:.2f} — excluded from consensus.",
+                )
+
     def consensus_price(self) -> Optional[float]:
+        """Median of non-stale, non-outlier external sources.
+        Falls back to kalshi_implied if all external sources are stale or outliers."""
         vals = [
             pp.price for name, pp in self.last_prices.items()
-            if name != "kalshi_implied" and pp.price is not None and not pp.stale
+            if name != "kalshi_implied"
+            and pp.price is not None
+            and not pp.stale
+            and not pp.outlier
         ]
         if not vals:
             pp = self.last_prices.get("kalshi_implied")
@@ -759,6 +853,7 @@ class EventEngine:
         if self.state == "OBSERVE_ONLY":
             self.state = "NORMAL"
 
+        self._check_contract_price_alerts()
         self._check_endangered()
         self._detect_shock()
         self._classify_shock()
@@ -767,6 +862,32 @@ class EventEngine:
 
         if self.state == "RECOVERY":
             self.state = "NORMAL"
+
+    def _check_contract_price_alerts(self) -> None:
+        """Warn when a position's Kalshi contract price drops below the warning threshold,
+        even if spot looks fine. This catches the 'Kalshi disagrees with spot' scenario."""
+        warn = self.params.alert_thresholds.get("position_drop_warning", 0.69)
+        consensus = self.consensus_price()
+        for p in self.positions:
+            if p.count <= 0:
+                continue
+            mid = p.current_bid or p.current_mid
+            if mid <= 0 or mid >= warn:
+                continue
+            drop_pct = (p.avg_price - mid) / p.avg_price * 100 if p.avg_price > 0 else 0
+            spot_ok = not self.position_endangered(p, consensus) if consensus is not None else None
+            spot_note = ""
+            if spot_ok is True:
+                spot_note = f" Spot ({consensus:.2f}) still looks OK — Kalshi leading."
+            elif spot_ok is False:
+                spot_note = f" Spot ({consensus:.2f}) also bearish."
+            self._add_action(
+                "warn", "ALERT",
+                f"{p.side.upper()} T{p.strike} contract at {mid:.2f} "
+                f"(−{drop_pct:.1f}% from avg {p.avg_price:.2f}, below {warn:.2f} warning).{spot_note} "
+                f"Consider exiting.",
+                p.ticker, p.side,
+            )
 
     def _detect_shock(self) -> None:
         price = self.consensus_price()
@@ -838,10 +959,13 @@ class EventEngine:
                     asyncio.create_task(self._execute_sell(p, p.count))
 
     def _check_endangered(self) -> None:
-        """Per-tick stop-loss: exits any leg whose consensus has crossed its strike buffer."""
+        """Per-tick stop-loss: exits any leg whose consensus has crossed its strike buffer.
+        After firing, alerts about any remaining paired legs so the user knows the bracket
+        is now incomplete."""
         consensus = self.consensus_price()
         if consensus is None:
             return
+        endangered_tickers: set = set()
         for p in self.positions:
             if p.count <= 0:
                 continue
@@ -857,6 +981,24 @@ class EventEngine:
                 self._add_action("danger", "SELL_LEG", reason, p.ticker, p.side, p.count)
                 if self.params.mode == "live" and self.armed:
                     asyncio.create_task(self._execute_sell(p, p.count))
+                endangered_tickers.add(p.ticker)
+
+        # Alert about remaining paired legs so the user can reposition
+        if endangered_tickers:
+            surviving = [
+                p for p in self.positions
+                if p.count > 0 and p.ticker not in endangered_tickers
+            ]
+            if surviving:
+                legs = ", ".join(
+                    f"{p.side.upper()} T{p.strike} ×{p.count:.0f} (~{p.current_mid:.2f})"
+                    for p in surviving
+                )
+                self._add_action(
+                    "warn", "ALERT",
+                    f"Bracket incomplete after stop-loss. Surviving leg(s): {legs}. "
+                    f"Consider selling or finding a replacement entry.",
+                )
 
     def _structure_drift(self) -> None:
         yes = sum(p.count for p in self.positions if p.side == "yes")
@@ -1233,12 +1375,10 @@ class Engine:
             return
 
         if not raw:
-            self.log("Portfolio sync: no open positions returned")
-            # Clear all event engines since portfolio is empty
-            self.event_engines.clear()
+            if self.event_engines:
+                self.log("Portfolio sync: no open positions — clearing all events")
+                self.event_engines.clear()
             return
-
-        self.log(f"Portfolio sync: {len(raw)} position(s) received")
 
         # Parse raw positions into a dict keyed by event_ticker.
         # Kalshi API v2 uses:
@@ -1287,7 +1427,6 @@ class Engine:
                     count=count,
                     avg_price=round(avg_price, 4),
                 ))
-                self.log(f"  {ticker} {side.upper()} x{count} @ {avg_price:.4f}")
             except Exception as e:
                 self.log(f"Skip position {ticker}: {e}")
 
@@ -1303,7 +1442,10 @@ class Engine:
                     logs_queue=self.logs,
                     armed=False,
                 )
-                self.log(f"New event discovered: {event_ticker}")
+                pos_summary = ", ".join(
+                    f"{p.side.upper()} T{p.strike} ×{p.count}" for p in new_positions
+                )
+                self.log(f"New event: {event_ticker} [{pos_summary}]")
 
             # Merge: preserve quote/peak data for existing positions.
             eng = self.event_engines[event_ticker]
@@ -1312,12 +1454,15 @@ class Engine:
             for np in new_positions:
                 if np.ticker in existing:
                     ex = existing[np.ticker]
+                    if ex.count != np.count:
+                        self.log(f"  {np.ticker} {np.side.upper()} count {ex.count} → {np.count}")
                     ex.count = np.count
                     merged.append(ex)
                 else:
                     np.current_mid = np.avg_price
                     np.peak_mid = np.avg_price
                     merged.append(np)
+                    self.log(f"  New position: {np.ticker} {np.side.upper()} ×{np.count} @ {np.avg_price:.4f}")
             eng.positions = merged
 
         # Remove engines whose event no longer has open positions.
@@ -1438,7 +1583,7 @@ class Engine:
         results = await self.event_engines[event_ticker].flatten()
         return {"ok": True, "mode": self.params.mode, "results": results}
 
-    async def sell_leg(self, ticker: str, qty: Optional[int], confirm: bool) -> Dict:
+    async def sell_leg(self, ticker: str, qty: Optional[float], confirm: bool) -> Dict:
         if not confirm:
             raise HTTPException(status_code=400, detail="confirm=true required")
         for eng in self.event_engines.values():
@@ -1447,6 +1592,82 @@ class Engine:
                 await eng._execute_sell(p, qty or p.count)
                 return {"ok": True}
         raise HTTPException(status_code=404, detail="Position not found")
+
+    async def sell_leg_limit(self, ticker: str, qty: float, limit_price_cents: int, confirm: bool) -> Dict:
+        """Place a day-order limit sell at an exact price. Does not execute immediately."""
+        if not confirm:
+            raise HTTPException(status_code=400, detail="confirm=true required")
+        for eng in self.event_engines.values():
+            p = next((x for x in eng.positions if x.ticker == ticker), None)
+            if not p:
+                continue
+            limit = limit_price_cents / 100.0
+            if self.params.mode != "live":
+                eng.log(f"PAPER limit sell: {qty} {p.side.upper()} {ticker} @ {limit_price_cents}¢")
+                return {"ok": True, "paper": True}
+            result = await self.kalshi.sell_position_limit(ticker, p.side, qty or p.count, limit)
+            if result.get("ok"):
+                eng.log(f"Limit sell placed: {qty} {p.side.upper()} {ticker} @ {limit_price_cents}¢  order_id={result.get('order_id')}")
+            else:
+                eng.log(f"Limit sell failed {ticker}: {result}")
+            return result
+        raise HTTPException(status_code=404, detail="Position not found")
+
+    async def sell_leg_adjusted(self, ticker: str, qty: float, confirm: bool, recheck_seconds: int = 30) -> Dict:
+        """Start a background task that reprices a sell order 1¢ below the best ask every
+        recheck_seconds until the position is fully closed. Non-blocking — returns immediately."""
+        if not confirm:
+            raise HTTPException(status_code=400, detail="confirm=true required")
+        for eng in self.event_engines.values():
+            p = next((x for x in eng.positions if x.ticker == ticker), None)
+            if not p:
+                continue
+            sell_qty = qty or p.count
+            asyncio.create_task(
+                self._adjusted_limit_sell_task(eng, p, sell_qty, recheck_seconds)
+            )
+            eng.log(f"Adjusted limit sell started: {sell_qty} {p.side.upper()} {ticker} @ ask−1¢, repricing every {recheck_seconds}s")
+            self._add_action("warn", "SELL_LEG", f"Adjusted limit sell started for {ticker}", ticker, p.side, sell_qty)
+            return {"ok": True, "started": True}
+        raise HTTPException(status_code=404, detail="Position not found")
+
+    async def _adjusted_limit_sell_task(
+        self, eng: "EventEngine", p: "Position", qty: float, recheck_seconds: int
+    ) -> None:
+        """Background: repeatedly reprices a day-order sell to 1¢ below the best ask
+        until the position fills or 20 iterations are exhausted."""
+        ticker = p.ticker
+        side = p.side
+        current_order_id: Optional[str] = None
+
+        for attempt in range(20):
+            # Cancel previous order before repricing
+            if current_order_id:
+                await self.kalshi.cancel_order(current_order_id)
+                current_order_id = None
+
+            # Check if position is already closed
+            current_count = next((pos.count for pos in eng.positions if pos.ticker == ticker), 0)
+            if current_count <= 0:
+                eng.log(f"Adjusted limit: {ticker} fully sold after {attempt} reprices")
+                return
+
+            # Get current market and reprice 1¢ below best ask
+            _, ask, _ = await self.kalshi.get_market_quote_for_side(ticker, side)
+            limit_price = max(0.01, ask - 0.01) if ask > 0.01 else 0.01
+            result = await self.kalshi.sell_position_limit(ticker, side, qty, limit_price)
+            if result.get("ok"):
+                current_order_id = result.get("order_id")
+                eng.log(f"Adjusted limit [{attempt+1}]: {ticker} @ {limit_price:.2f} (ask {ask:.2f})")
+            else:
+                eng.log(f"Adjusted limit [{attempt+1}]: order failed: {result}")
+
+            await asyncio.sleep(recheck_seconds)
+
+        # Cancel any remaining order on timeout
+        if current_order_id:
+            await self.kalshi.cancel_order(current_order_id)
+        eng.log(f"Adjusted limit: max reprices reached for {ticker} — cancelled")
 
 
 # ---------------------------------------------------------------------------
@@ -1510,6 +1731,16 @@ async def api_sell_leg(req: SellRequest):
     if not req.ticker:
         raise HTTPException(status_code=400, detail="ticker required")
     return await engine.sell_leg(req.ticker, req.qty, req.confirm)
+
+
+@app.post("/api/sell_leg_limit")
+async def api_sell_leg_limit(req: LimitSellRequest):
+    return await engine.sell_leg_limit(req.ticker, req.qty or 0, req.limit_price_cents, req.confirm)
+
+
+@app.post("/api/sell_leg_adjusted")
+async def api_sell_leg_adjusted(req: AdjustedSellRequest):
+    return await engine.sell_leg_adjusted(req.ticker, req.qty or 0, req.confirm, req.recheck_seconds)
 
 
 @app.get("/api/buy_candidates")
