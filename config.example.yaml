@@ -1,0 +1,111 @@
+mode: "paper"     # "paper" = log actions only   "live" = real orders when event is armed
+armed: false      # arm new events by default; toggle per-event in the UI
+poll_seconds: 3
+
+api:
+  key_id: "YOUR-KEY-ID-FROM-KALSHI"
+  private_key_path: "your-key-file.txt"
+  base_url: "https://api.elections.kalshi.com"
+
+# Bootstrap: pre-load positions if the Kalshi portfolio sync hasn't returned yet.
+# Leave blank once you trust live sync (portfolio is refreshed every poll cycle).
+event_ticker: ""
+settlement_time: ""
+positions: []
+
+# ---------------------------------------------------------------------------
+# Safety
+# ---------------------------------------------------------------------------
+
+safety:
+  global_drawdown_limit: -50.0    # alert when session net P/L falls below this % of start balance
+                                  # (alert only — use SELL EVERYTHING button to act)
+
+# ---------------------------------------------------------------------------
+# Buy-side
+# ---------------------------------------------------------------------------
+
+max_deploy_pct: 0.50    # max fraction of balance to deploy at once (0.50 = 50%)
+
+entry_zone:
+  min: 0.70    # lowest YES/NO mid to consider buying (below → collapse risk)
+  max: 0.80    # highest mid to buy (above → compressed upside)
+
+alert_thresholds:
+  drawdown_warning_pct: 0.15    # warn when contract drops >15% from your entry price
+                                # relative to entry — so buying at 38¢ won't false-alarm at 65¢
+
+# ---------------------------------------------------------------------------
+# Price sources
+# Disable any source that becomes unreliable.  Gold events use the goldprice
+# source instead of oilprice (detected automatically by instrument prefix).
+# ---------------------------------------------------------------------------
+
+sources:
+  oilprice:
+    enabled: true
+    min_refresh_seconds: 15
+    symbol: "WTI-Crude"        # used for WTI/Brent events
+  yahoo:
+    enabled: true
+    min_refresh_seconds: 60
+    symbol: "CL=F"             # overridden per-event by instrument map (BZ=F, GC=F, NG=F, …)
+  kalshi_implied:
+    enabled: true
+    min_refresh_seconds: 3
+
+# ---------------------------------------------------------------------------
+# Shock detection  (display + state machine — no auto-sell on regime break)
+# ---------------------------------------------------------------------------
+
+shock_logic:
+  shock_threshold_pct: 2.0          # % move in shock_window_minutes that triggers SHOCK_WATCH
+  shock_window_minutes: 10
+  recovery_window_minutes: 15       # time to recover before state → REGIME_BREAK
+  min_recovery_pct: 0.75            # minimum rebound % to confirm recovery
+  hard_break_confirm_minutes: 15
+
+# ---------------------------------------------------------------------------
+# Source consensus
+# ---------------------------------------------------------------------------
+
+source_consensus:
+  stale_after_seconds: 90           # mark a price feed stale after this many seconds
+  max_external_disagreement: 3.0    # % deviation from group median before a source is flagged
+                                    # OUTLIER and excluded from consensus. kalshi_implied is
+                                    # always included as a reference vote but never excluded.
+  kalshi_lag_threshold: 1.00        # informational only
+  kalshi_weight: 2                  # kalshi_implied counts this many votes in the weighted median
+
+# ---------------------------------------------------------------------------
+# Structure  (strike buffer for endangered-position stop-loss)
+# ---------------------------------------------------------------------------
+
+structure:
+  lower_boundary_buffer: 0.75    # YES exits when consensus < strike + buffer
+  upper_boundary_buffer: 0.75    # NO  exits when consensus > strike - buffer
+  max_yes_no_imbalance: 1.75     # ratio alert (informational)
+  min_table_width: 4.00          # informational
+  min_hold_seconds: 300          # never auto-sell within this many seconds of entry (5 min default)
+
+# ---------------------------------------------------------------------------
+# Time risk  (exits endangered legs near settlement)
+# ---------------------------------------------------------------------------
+
+time_risk:
+  flatten_unstable_under_minutes: 60    # sell endangered legs if < this many minutes remain
+  tighten_under_hours: 3                # informational
+
+# ---------------------------------------------------------------------------
+# profit_harvest  (kept for config compatibility — logic is disabled)
+# ---------------------------------------------------------------------------
+
+profit_harvest:
+  arm_at: 0.88
+  first_trim_at: 0.90
+  second_trim_at: 0.93
+  full_exit_at: 0.96
+  trail_after_arm: 0.04
+  trail_after_90: 0.03
+  first_trim_fraction: 0.33
+  second_trim_fraction: 0.33

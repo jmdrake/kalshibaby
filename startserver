@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Start KalshiBaby using the default config.yaml
+set -euo pipefail
+cd "$(dirname "$0")"
+export KALSHI_CONFIG=config.yaml
+exec uvicorn kalshibaby_backend:app --host 0.0.0.0 --port 8765 --reload

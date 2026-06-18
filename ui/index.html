@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>KalshiBaby v3</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="/ui/styles.css" />
+</head>
+<body>
+  <header>
+    <div>
+      <h1>KalshiBaby v3</h1>
+      <div id="modeBadge" class="mode-badge paper">PAPER</div>
+    </div>
+    <div class="header-scoreboard" id="headerScoreboard">
+      <span class="muted">Started: <b id="sbStart">—</b></span>
+      <span class="muted">Cash: <b id="sbCash">—</b></span>
+      <span class="muted">Realized: <b id="sbRealized">—</b></span>
+      <span class="muted">Unrealized: <b id="sbUnrealized">—</b></span>
+      <span class="muted">Net: <b id="sbNet">—</b> <span id="sbPct" class="muted"></span></span>
+    </div>
+    <div class="header-actions">
+      <button class="small muted-btn" onclick="exportCSV()">Export CSV</button>
+      <button id="sellAllBtn" class="danger">SELL EVERYTHING NOW</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Global source toggles -->
+    <section class="card wide source-card">
+      <div class="card-title">Price Sources</div>
+      <div class="source-row">
+        <label><input type="checkbox" id="src_oilprice" /> <span class="dot blue"></span> Spot</label>
+        <label><input type="checkbox" id="src_yahoo" /> <span class="dot green"></span> Yahoo</label>
+        <label><input type="checkbox" id="src_kalshi_implied" /> <span class="dot orange"></span> Kalshi implied</label>
+      </div>
+    </section>
+
+    <!-- Event sections — rendered dynamically by app.js -->
+    <div id="eventsContainer"></div>
+
+    <!-- Buy candidates -->
+    <section class="card wide" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div class="card-title" style="margin:0">Buy Candidates <span class="muted" style="font-weight:400;font-size:12px">(entry zone 70–80¢)</span></div>
+        <button class="small muted-btn" onclick="refreshCandidates()">Scan</button>
+      </div>
+      <div id="candidatesContainer"><span class="muted">Press Scan to search open markets.</span></div>
+    </section>
+
+    <!-- Global parameters -->
+    <section class="grid two-col">
+      <div class="card">
+        <div class="card-title">Global Parameters</div>
+        <div class="params">
+          <label>Poll seconds <input id="pollSeconds" type="number" step="1" /></label>
+          <label>Shock % <input id="shockThreshold" type="number" step="0.1" /></label>
+          <label>Recovery min % <input id="minRecovery" type="number" step="0.1" /></label>
+          <label>Entry zone min ¢ <input id="entryZoneMin" type="number" step="0.01" /></label>
+          <label>Entry zone max ¢ <input id="entryZoneMax" type="number" step="0.01" /></label>
+          <label>Max deploy % <input id="maxDeployPct" type="number" step="0.05" /></label>
+
+        </div>
+        <button id="saveParamsBtn">Save Parameters</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Mode</div>
+        <div style="margin-bottom:12px">
+          <div class="muted" style="margin-bottom:8px">Current execution mode:</div>
+          <div id="modeDisplay" class="big" style="font-size:24px">PAPER</div>
+        </div>
+        <div class="muted" style="margin-bottom:8px">
+          PAPER — logs actions, no real orders.<br>
+          LIVE — executes when event is armed.
+        </div>
+        <div class="mode-btns">
+          <button id="setPaperBtn">Set PAPER</button>
+          <button id="setLiveBtn" class="danger">Set LIVE</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Global actions + logs -->
+    <section class="grid">
+      <div class="card">
+        <div class="card-title">Actions</div>
+        <div id="actions"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Logs</div>
+        <div id="logs"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>

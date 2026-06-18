@@ -1,0 +1,70 @@
+# KalshiBaby News Agent Configuration
+
+kalshibaby_url: "http://127.0.0.1:8765"
+ollama_url: "http://localhost:99999/api/generate"
+model: "none"
+poll_seconds: 15
+min_confidence: 0.65       # lowered for keyword fallback mode
+dry_run: false
+
+feeds:
+  ap_world:
+    url: "https://feeds.apnews.com/apnews/worldnews"
+    enabled: true
+    weight: 1.0
+
+  ap_politics:
+    url: "https://feeds.apnews.com/apnews/politics"
+    enabled: true
+    weight: 1.0
+
+  aljazeera:
+    url: "https://www.aljazeera.com/xml/rss/all.xml"
+    enabled: true
+    weight: 1.0
+
+  reuters_world:
+    url: "https://feeds.reuters.com/Reuters/worldNews"
+    enabled: true
+    weight: 1.0
+
+  truthsocial:
+    url: "https://trumpstruth.org/feed"
+    enabled: true
+    weight: 2.0
+    fallback_url: "https://trumpstruth.org/feed"
+
+  osint_defender:
+    url: "https://nitter.privacydev.net/OSINTdefender/rss"
+    enabled: true
+    weight: 1.5
+
+  ukmto:
+    url: "https://nitter.privacydev.net/UK_MTO/rss"
+    enabled: true
+    weight: 1.5
+
+priority_keywords:
+  - trump
+  - iran
+  - hormuz
+  - strike
+  - bomb
+  - ceasefire
+  - deal
+  - nuclear
+  - kharg
+  - hegseth
+  - centcom
+  - irgc
+  - oil
+  - brent
+  - wti
+  - tanker
+  - blockade
+  - apache
+  - shahed
+  - iaea
+  - pakistan
+  - qatar
+  - mediator
