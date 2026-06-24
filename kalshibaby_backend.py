@@ -722,20 +722,23 @@ class KalshiClient:
         return bid, ask, mid
 
     async def sell_position(self, ticker: str, side: Side, qty: int) -> Dict[str, Any]:
-        path = "/trade-api/v2/portfolio/orders"
+        # V2 events/orders endpoint — migrated from deprecated /portfolio/orders
+        path = "/trade-api/v2/portfolio/events/orders"
         url = self.base_url + path
-        # FOK sell requires a limit price. Use 1 cent as the floor so the order
-        # behaves like a market sell — Kalshi fills at the best available bid.
-        price_key = "yes_price" if side == "yes" else "no_price"
+        # V2 uses bid/ask from YES perspective only
+        # sell YES = ask side at floor price 0.01
+        # sell NO = bid side at ceiling price 0.99
+        v2_side = "ask" if side == "yes" else "bid"
+        floor_price = "0.0100" if side == "yes" else "0.9900"
         payload = {
             "ticker": ticker,
-            "action": "sell",
-            "side": side,
-            "count": qty,
             "client_order_id": str(uuid.uuid4()),
+            "side": v2_side,
+            "count": str(float(qty)),
+            "price": floor_price,
             "time_in_force": "immediate_or_cancel",
-            "reduce_only": True,
-            price_key: 1,
+            "reduce_only": False,
+            "self_trade_prevention_type": "taker_at_cross",
         }
         try:
             r = requests.post(url, headers=self._auth_headers("POST", path), json=payload, timeout=10)
@@ -1304,6 +1307,7 @@ class Engine:
 
             side: Side = "yes" if pos_float > 0 else "no"
             count = int(abs(pos_float))
+            count_fp = abs(pos_float)  # fractional count for avg_price calc
 
             # Cost basis = contracts cost + fees (matches what Kalshi shows as avg price).
             def _flt(val: Any) -> float:
@@ -1314,7 +1318,7 @@ class Engine:
 
             total_traded = _flt(p.get("total_traded_dollars"))
             fees_paid    = _flt(p.get("fees_paid_dollars"))
-            avg_price    = (total_traded + fees_paid) / count if count else 0.0
+            avg_price    = (total_traded + fees_paid) / count_fp if count_fp else 0.0
 
             try:
                 live[event_ticker].append(Position(
