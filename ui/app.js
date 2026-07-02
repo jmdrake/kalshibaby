@@ -216,8 +216,10 @@ function renderEventStatus(et, es) {
             <div class="bot-panel">
               <div class="bot-panel-title">⚙ Position Bot: ${p.ticker}</div>
               <div class="bot-panel-row">
-                <label><input type="checkbox" id="bp_stoploss_on_${cssId(p.ticker)}"> Stop loss</label>
+                <label><input type="checkbox" id="bp_stoploss_on_${cssId(p.ticker)}"> Stop loss
                 <input type="number" id="bp_stoploss_${cssId(p.ticker)}" step="0.01" min="0.01" max="0.99" placeholder="e.g. 0.45 or 45" style="width:80px">
+		</label>
+                <label>Strike cushion $<input type="number" step="0.25" min="0" max="10" id="bp_cushion_${cssId(p.ticker)}" placeholder="e.g. 1.00" style="width:70px"></label>
                 <span class="muted" style="font-size:11px">Sell immediately if price drops to or below this (dollars or cents)</span>
               </div>
               <div class="bot-panel-row">
@@ -565,9 +567,22 @@ async function setMode(mode) {
 async function refreshCandidates() {
   const container = document.getElementById("candidatesContainer");
   container.innerHTML = '<span class="muted">Scanning...</span>';
+
+  // Use the manually entered ticker first, then fall back to first active event
+  let et = (document.getElementById("scanEventTicker")?.value || "").trim();
+  if (!et && window._lastStatus) {
+    const eventKeys = Object.keys(window._lastStatus.events || {});
+    if (eventKeys.length > 0) et = eventKeys[0];
+  }
+
+  const url = et ? `/api/buy_candidates?event_ticker=${encodeURIComponent(et)}` : "/api/buy_candidates";
   try {
-    const r = await fetch("/api/buy_candidates");
+    const r = await fetch(url);
     const data = await r.json();
+    if (data.hint) {
+      container.innerHTML = `<span class="muted">${data.hint}</span>`;
+      return;
+    }
     renderCandidates(data.candidates || []);
   } catch (e) {
     container.innerHTML = `<span class="negative">Error: ${e}</span>`;
@@ -629,6 +644,7 @@ function populateBotPanel(ticker, cfg) {
   const setVal   = (elId, val) => { const el = document.getElementById(elId); if (el && val != null) el.value = val; };
   setCheck('bp_stoploss_on_'  + id, cfg.stop_loss  != null);
   setVal  ('bp_stoploss_'     + id, cfg.stop_loss);
+  setVal  ('bp_cushion_'      + id, cfg.strike_cushion);
   setCheck('bp_limit_on_'     + id, cfg.limit_sell != null);
   setVal  ('bp_limit_'        + id, cfg.limit_sell);
   setCheck('bp_harvest_'      + id, cfg.harvest);
@@ -672,6 +688,7 @@ async function saveBotPanel(eventTicker, ticker) {
 
   const config = {
     stop_loss:           getCheck('bp_stoploss_on_'  + id) ? getPrice('bp_stoploss_' + id)   : null,
+    strike_cushion:      getPrice('bp_cushion_' + id) || null,
     limit_sell:          getCheck('bp_limit_on_'     + id) ? getPrice('bp_limit_'    + id)   : null,
     harvest:             getCheck('bp_harvest_'      + id),
     harvest_sensitivity: parseInt(document.getElementById('bp_sensitivity_' + id)?.value ?? '3'),
@@ -679,7 +696,7 @@ async function saveBotPanel(eventTicker, ticker) {
   };
 
   // Validate at least one mechanism is enabled
-  if (!config.stop_loss && !config.limit_sell && !config.harvest && !config.time_exit) {
+  if (!config.stop_loss && !config.limit_sell && !config.harvest && !config.time_exit && !config.strike_cushion) {
     alert('Enable at least one bot mechanism, or use Clear Bot to remove.');
     return;
   }
@@ -716,7 +733,9 @@ function isBotPanelOpen() {
 async function refresh() {
   if (isBotPanelOpen()) return;   // don't re-render while user is editing a bot
   const r = await fetch("/api/status");
-  renderStatus(await r.json());
+  const status = await r.json();
+  window._lastStatus = status;   // cache for scan auto-detection
+  renderStatus(status);
 }
 
 document.getElementById("saveParamsBtn").addEventListener("click", saveParams);
@@ -730,3 +749,31 @@ document.getElementById("setLiveBtn").addEventListener("click", () => setMode("l
 
 refresh();
 setInterval(refresh, 3000);
+
+// ---------------------------------------------------------------------------
+// Inject event ticker input next to Scan button (no HTML change needed)
+// ---------------------------------------------------------------------------
+(function injectScanInput() {
+  function doInject() {
+    const scanBtn = Array.from(document.querySelectorAll("button")).find(
+      b => b.textContent.trim() === "Scan"
+    );
+    if (!scanBtn) return;
+    if (document.getElementById("scanEventTicker")) return; // already injected
+
+    const input = document.createElement("input");
+    input.id = "scanEventTicker";
+    input.type = "text";
+    input.placeholder = "Event ticker (auto)";
+    input.style.cssText = "width:220px; margin-right:6px; font-size:0.85em; padding:2px 6px;";
+    input.title = "Leave blank to auto-detect from active events, or type e.g. KXBRENTD-26JUN2917";
+    scanBtn.parentNode.insertBefore(input, scanBtn);
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", doInject);
+  } else {
+    doInject();
+    // Retry after a short delay in case the button is rendered dynamically
+    setTimeout(doInject, 500);
+  }
+})();

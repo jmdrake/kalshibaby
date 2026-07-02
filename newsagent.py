@@ -465,7 +465,7 @@ class NewsAgent:
 
     def tick(self) -> None:
         now = datetime.now().strftime("%H:%M:%S")
-        print(f"[{now}] Polling {len(self.pollers)} feeds...")
+        # polling heartbeat suppressed
 
         for poller in self.pollers:
             items = poller.fetch()

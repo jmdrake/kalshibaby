@@ -140,6 +140,7 @@ class RuntimeParams(BaseModel):
     time_risk: Dict[str, float]
     sources: Dict[str, Dict[str, Any]]
     safety: Dict[str, float] = Field(default_factory=lambda: {"global_drawdown_limit": -50.0})
+    entry_zone: Dict[str, float] = Field(default_factory=lambda: {"min": 0.70, "max": 0.80})
 
 
 class PricePoint(BaseModel):
@@ -577,16 +578,52 @@ class OilPriceSource(PriceSource):
 
 class GoldPriceSource(PriceSource):
     """
-    Gold spot price (USD/troy oz) via Stooq XAUUSD CSV feed (no auth required).
-    Used as the secondary spot source for gold events instead of oilprice.com.
+    Gold spot price (USD/troy oz) — primary: Stooq XAUUSD CSV, fallback: gold-api.com.
+
+    Stooq notes:
+    - Do NOT include 'v' (volume) in format string — xauusd has no volume data,
+      Stooq returns 'N/D' in that column which breaks float parsing.
+      Correct URL uses &f=sd2t2ohlc (no v).
+    - Stooq returns 'N/D' instead of a number when data is unavailable;
+      parser guards against this explicitly.
+    - CSV columns (0-based): Symbol, Date, Time, Open, High, Low, Close
+      Close is index 6.
     """
-    _URL = "https://stooq.com/q/l/?s=xauusd&f=sd2t2ohlcv&h&e=csv"
+    _STOOQ_URL   = "https://stooq.com/q/l/?s=xauusd&f=sd2t2ohlc&h&e=csv"
+    _GOLDAPI_URL = "https://api.gold-api.com/price/XAU"
+    _SANITY_LO   = 1000.0
+    _SANITY_HI   = 8000.0
 
     def __init__(self, min_refresh_seconds: int = 30) -> None:
         self.name = "goldprice"
         self.min_refresh_seconds = min_refresh_seconds
         self._last_price: Optional[float] = None
         self._last_fetch_ts: float = 0.0
+
+    def _fetch_stooq(self) -> float:
+        r = requests.get(self._STOOQ_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        r.raise_for_status()
+        lines = r.text.strip().split("\n")
+        if len(lines) < 2:
+            raise ValueError("Stooq: empty response")
+        row = lines[1].split(",")
+        if len(row) < 7:
+            raise ValueError(f"Stooq: unexpected row format: {lines[1]!r}")
+        raw = row[6].strip()
+        if raw in ("N/D", "N/A", "", "-"):
+            raise ValueError(f"Stooq: no data (\'{raw}\') — market may be closed")
+        price = float(raw)
+        if not (self._SANITY_LO <= price <= self._SANITY_HI):
+            raise ValueError(f"Stooq: price {price} outside sanity range")
+        return price
+
+    def _fetch_goldapi(self) -> float:
+        r = requests.get(self._GOLDAPI_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
+        r.raise_for_status()
+        price = float(r.json()["price"])
+        if not (self._SANITY_LO <= price <= self._SANITY_HI):
+            raise ValueError(f"gold-api: price {price} outside sanity range")
+        return price
 
     async def get_price(self) -> PricePoint:
         now = now_ts()
@@ -597,30 +634,22 @@ class GoldPriceSource(PriceSource):
                 ts=self._last_fetch_ts,
                 stale=self._last_price is None,
             )
-        try:
-            r = requests.get(
-                self._URL,
-                headers={"User-Agent": "Mozilla/5.0"},
-                timeout=10,
-            )
-            r.raise_for_status()
-            # Response: Symbol,Date,Time,Open,High,Low,Close,Volume\nXAUUSD,2026-05-03,...
-            lines = r.text.strip().split("\n")
-            if len(lines) < 2:
-                raise ValueError("empty Stooq response")
-            row = lines[1].split(",")
-            price = float(row[6])  # Close column
-            self._last_price = price
-            self._last_fetch_ts = now
-            return PricePoint(source=self.name, price=price, ts=now)
-        except Exception as e:
-            return PricePoint(
-                source=self.name,
-                price=self._last_price,
-                ts=self._last_fetch_ts or now,
-                stale=True,
-                error=str(e),
-            )
+        errors = []
+        for fetch_fn in (self._fetch_stooq, self._fetch_goldapi):
+            try:
+                price = fetch_fn()
+                self._last_price = price
+                self._last_fetch_ts = now
+                return PricePoint(source=self.name, price=price, ts=now)
+            except Exception as e:
+                errors.append(f"{fetch_fn.__name__}: {e}")
+        return PricePoint(
+            source=self.name,
+            price=self._last_price,
+            ts=self._last_fetch_ts or now,
+            stale=True,
+            error=" | ".join(errors),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -884,13 +913,16 @@ class EventEngine:
             p.peak_mid = max(p.peak_mid, p.current_mid)
 
     def consensus_price(self) -> Optional[float]:
+        # Include kalshi_implied in the median — for gold events it is the
+        # most relevant price source (Pyth-based, settles at 5pm EDT spot).
+        # Previously excluded, which caused stop/endangered decisions to rely
+        # solely on Yahoo futures price (~$15 divergence observed Jul 1 2026).
         vals = [
-            pp.price for name, pp in self.last_prices.items()
-            if name != "kalshi_implied" and pp.price is not None and not pp.stale
+            pp.price for pp in self.last_prices.values()
+            if pp.price is not None and not pp.stale
         ]
         if not vals:
-            pp = self.last_prices.get("kalshi_implied")
-            return pp.price if pp and pp.price is not None else None
+            return None
         vals.sort()
         n = len(vals)
         return vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2
@@ -1372,18 +1404,7 @@ class Engine:
     # -----------------------------------------------------------------------
 
     def _check_global_safety(self) -> None:
-        snapshots = [e.risk_snapshot() for e in self.event_engines.values()]
-        total_cost = sum(s.cost_basis for s in snapshots)
-        total_pl   = sum(s.unrealized_pl for s in snapshots)
-        if total_cost <= 0:
-            return
-        pct = (total_pl / total_cost) * 100.0
-        limit = self.params.safety.get("global_drawdown_limit", -50.0)
-        if pct <= limit:
-            self.log(f"SAFETY: Global P/L {pct:.1f}% <= drawdown limit {limit:.1f}%. Flattening all.")
-            self._add_action("danger", "SELL_ALL", f"Global drawdown kill switch: {pct:.1f}%")
-            for eng in self.event_engines.values():
-                asyncio.create_task(eng.flatten())
+        pass  # PERMANENTLY DISABLED — unreliable due to avg_price calculation issues
 
     # -----------------------------------------------------------------------
     # Main loop
@@ -1394,7 +1415,7 @@ class Engine:
         for eng in list(self.event_engines.values()):
             await eng.update_prices()
             eng.evaluate_state_machine()
-        self._check_global_safety()
+        # self._check_global_safety()  # PERMANENTLY DISABLED — avg_price bugs make this unreliable
         await self._execute_position_bots()
 
     async def _execute_position_bots(self) -> None:
@@ -1419,14 +1440,37 @@ class Engine:
                 # ── Stop loss ──────────────────────────────────────────────
                 stop = cfg.get("stop_loss")
                 if stop is not None and mid <= stop:
-                    eng._add_action(
-                        "danger", "SELL_LEG",
-                        f"Bot stop loss: mid {mid:.2f} <= stop {stop:.2f}",
-                        p.ticker, p.side, p.count,
-                    )
-                    if self.params.mode == "live" and eng.armed:
-                        await eng._execute_sell(p, p.count)
-                    continue  # Don't check other conditions once stop fires
+                    # Strike cushion gate: only fire if spot is close to strike
+                    # Prevents firing on illiquid overnight prices when position is safe
+                    strike_cushion = cfg.get("strike_cushion")
+                    spot = eng.consensus_price()
+                    cushion_ok = True
+                    actual_cushion = None
+                    if strike_cushion is not None and spot is not None:
+                        if p.side == "no":
+                            actual_cushion = p.strike - spot
+                        else:
+                            actual_cushion = spot - p.strike
+                        cushion_ok = actual_cushion <= strike_cushion
+                        if not cushion_ok:
+                            self.log(
+                                f"Stop loss BLOCKED: {p.ticker} "
+                                f"mid={mid:.2f} but spot cushion "
+                                f"{actual_cushion:.2f} > required {strike_cushion:.2f}"
+                            )
+                    if cushion_ok:
+                        reason = f"Bot stop loss: mid {mid:.2f} <= stop {stop:.2f}"
+                        if actual_cushion is not None:
+                            reason += f" (spot cushion {actual_cushion:.2f})"
+                        eng._add_action("danger", "SELL_LEG", reason,
+                            p.ticker, p.side, p.count)
+                        if self.params.mode == "live" and eng.armed:
+                            await eng._execute_sell(p, p.count)
+                        # Remove bot config immediately so portfolio sync
+                        # restoring count before fill is confirmed cannot
+                        # cause the stop to re-fire on the next poll cycle.
+                        self.position_bots.pop(p.ticker, None)
+                        continue  # Don't check other conditions once stop fires
 
                 # ── Limit sell (take profit) ───────────────────────────────
                 limit = cfg.get("limit_sell")
@@ -1442,19 +1486,32 @@ class Engine:
 
                 # ── Momentum harvest ───────────────────────────────────────
                 if cfg.get("harvest"):
-                    sensitivity = int(cfg.get("harvest_sensitivity", 3))
-                    # Trail size scales with sensitivity: 1=tight(2%), 10=loose(11%)
-                    trail_pct = 0.01 + (sensitivity - 1) * 0.01
-                    if p.peak_mid > 0 and mid <= p.peak_mid * (1 - trail_pct):
-                        eng._add_action(
-                            "warn", "SELL_LEG",
-                            f"Bot harvest: mid {mid:.2f} fell {trail_pct*100:.0f}% "
-                            f"from peak {p.peak_mid:.2f} (sensitivity {sensitivity})",
-                            p.ticker, p.side, p.count,
-                        )
-                        if self.params.mode == "live" and eng.armed:
-                            await eng._execute_sell(p, p.count)
-                        continue
+                    # Optional arm price: trailing logic is inert until mid has
+                    # reached this contract price at least once. Without this,
+                    # the trail compares against peak_mid from the moment the
+                    # position was opened/bot was attached, which can fire on
+                    # a peak that was never actually profitable.
+                    arm_at = cfg.get("harvest_arm_at")
+                    armed_by_price = arm_at is None or p.peak_mid >= arm_at
+
+                    if armed_by_price:
+                        sensitivity = int(cfg.get("harvest_sensitivity", 3))
+                        # Trail size scales with sensitivity: 1=tight(2%), 10=loose(11%)
+                        trail_pct = 0.01 + (sensitivity - 1) * 0.01
+                        if p.peak_mid > 0 and mid <= p.peak_mid * (1 - trail_pct):
+                            reason = (
+                                f"Bot harvest: mid {mid:.2f} fell {trail_pct*100:.0f}% "
+                                f"from peak {p.peak_mid:.2f} (sensitivity {sensitivity})"
+                            )
+                            if arm_at is not None:
+                                reason += f" [armed at {arm_at:.2f}]"
+                            eng._add_action(
+                                "warn", "SELL_LEG", reason,
+                                p.ticker, p.side, p.count,
+                            )
+                            if self.params.mode == "live" and eng.armed:
+                                await eng._execute_sell(p, p.count)
+                            continue
 
                 # ── Time exit ──────────────────────────────────────────────
                 time_exit = cfg.get("time_exit")
@@ -1792,3 +1849,186 @@ async def api_debug_portfolio():
             "probe_reachable": probe_ok,
             "probe_status": probe_status,
         }
+
+
+# ---------------------------------------------------------------------------
+# Buy candidates scan — finds open contracts in the entry price zone
+# ---------------------------------------------------------------------------
+
+KALSHI_FEE_RATE = 0.07   # 7% of max(yes_price, no_price), capped at $0.07/contract
+
+
+@app.get("/api/buy_candidates")
+async def api_buy_candidates(event_ticker: Optional[str] = None):
+    """
+    Scans open markets for contracts in the configured entry_zone (default 70-80c).
+    Pass ?event_ticker=KXBRENTD-26JUN2917 to scan a specific event even with no
+    active positions.  Without it, scans all events the engine is currently tracking.
+    """
+    zone_min = engine.params.entry_zone.get("min", 0.70)
+    zone_max = engine.params.entry_zone.get("max", 0.80)
+
+    candidates = []
+
+    # Build (et, spot) pairs — direct ticker takes priority, else all tracked events
+    if event_ticker:
+        eng = engine.event_engines.get(event_ticker)
+        scan_list = [(event_ticker, eng.consensus_price() if eng else None)]
+    else:
+        scan_list = [(et, eng.consensus_price()) for et, eng in engine.event_engines.items()]
+
+    if not scan_list:
+        return {
+            "candidates": [],
+            "zone_min": zone_min,
+            "zone_max": zone_max,
+            "hint": "No active events tracked and no event_ticker param supplied. "
+                    "Try /api/buy_candidates?event_ticker=KXBRENTD-26JUN2917",
+        }
+
+    for event_ticker, spot in scan_list:
+        # Fetch all open markets for this event from Kalshi
+        url = engine.kalshi.base_url + "/trade-api/v2/markets"
+        try:
+            r = requests.get(
+                url,
+                params={"event_ticker": event_ticker, "status": "open", "limit": 200},
+                timeout=8,
+            )
+            if not r.ok:
+                continue
+            markets = r.json().get("markets", [])
+        except Exception:
+            continue
+
+        def _flt(v: Any) -> Optional[float]:
+            try:
+                return float(v) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        for m in markets:
+            ticker = m.get("ticker", "")
+            strike = parse_strike(ticker)
+
+            for side in ("yes", "no"):
+                bid_key = f"{side}_bid_dollars"
+                ask_key = f"{side}_ask_dollars"
+                bid = _flt(m.get(bid_key))
+                ask = _flt(m.get(ask_key))
+                if bid is None or ask is None:
+                    continue
+                mid = (bid + ask) / 2 if (bid > 0 and ask > 0) else bid or ask
+                if mid <= 0:
+                    continue
+                if not (zone_min <= mid <= zone_max):
+                    continue
+
+                # Fee estimate: 7% of the contract price, min $0.01, max $0.07
+                fee = round(min(0.07, max(0.01, mid * KALSHI_FEE_RATE)), 4)
+
+                distance: Optional[float] = None
+                if spot is not None:
+                    # For Yes: positive distance = strike is above spot (riskier)
+                    # For No:  positive distance = strike is below spot (safer)
+                    distance = round(
+                        (strike - spot) if side == "yes" else (spot - strike), 2
+                    )
+
+                candidates.append({
+                    "ticker": ticker,
+                    "event_ticker": event_ticker,
+                    "side": side,
+                    "strike": strike,
+                    "bid": round(bid, 4),
+                    "ask": round(ask, 4),
+                    "mid": round(mid, 4),
+                    "spot": round(spot, 2) if spot is not None else None,
+                    "distance": distance,
+                    "fee_per_contract": fee,
+                    "fee_3_contracts": round(fee * 3, 4),
+                })
+
+    # Sort: closest to spot first (smallest absolute distance), then by mid desc
+    candidates.sort(key=lambda c: (
+        abs(c["distance"]) if c["distance"] is not None else 999,
+        -c["mid"],
+    ))
+
+    return {"candidates": candidates, "zone_min": zone_min, "zone_max": zone_max}
+
+
+# ---------------------------------------------------------------------------
+# Execute buy order
+# ---------------------------------------------------------------------------
+
+class BuyRequest(BaseModel):
+    ticker: str
+    side: Side
+    qty: int
+    limit_price_cents: int   # 1–99 cents
+    confirm: bool = False
+
+
+@app.post("/api/execute_buy")
+async def api_execute_buy(req: BuyRequest):
+    """
+    Places a buy order for the given contract.  In paper mode logs the intent
+    without touching the API.  In live mode sends an IOC limit order to Kalshi.
+    Requires confirm=true.
+    """
+    if not req.confirm:
+        raise HTTPException(status_code=400, detail="confirm=true required")
+    if not (1 <= req.limit_price_cents <= 99):
+        raise HTTPException(status_code=400, detail="limit_price_cents must be 1–99")
+    if req.qty <= 0:
+        raise HTTPException(status_code=400, detail="qty must be positive")
+
+    limit_price = req.limit_price_cents / 100.0
+
+    if engine.params.mode != "live":
+        engine.log(
+            f"PAPER BUY: {req.qty} {req.side.upper()} {req.ticker} "
+            f"@ {req.limit_price_cents}¢"
+        )
+        return {"ok": True, "paper": True, "ticker": req.ticker,
+                "side": req.side, "qty": req.qty,
+                "limit_price": limit_price}
+
+    # Live execution
+    k = engine.kalshi
+    if not k.api_key_id:
+        raise HTTPException(status_code=503, detail="Kalshi API credentials not configured")
+
+    path = "/trade-api/v2/portfolio/orders"
+    url = k.base_url + path
+    price_key = "yes_price" if req.side == "yes" else "no_price"
+    payload = {
+        "ticker": req.ticker,
+        "action": "buy",
+        "side": req.side,
+        "count": req.qty,
+        "client_order_id": str(uuid.uuid4()),
+        "time_in_force": "ioc",
+        price_key: req.limit_price_cents,   # Kalshi expects integer cents
+    }
+    try:
+        r = requests.post(
+            url,
+            headers=k._auth_headers("POST", path),
+            json=payload,
+            timeout=10,
+        )
+        body = r.json() if r.text else {}
+        ok = r.ok
+        if ok:
+            engine.log(
+                f"BUY PLACED: {req.qty} {req.side.upper()} {req.ticker} "
+                f"@ {req.limit_price_cents}¢  order_id={body.get('order', {}).get('order_id','?')}"
+            )
+        else:
+            engine.log(f"BUY FAILED: {req.ticker} HTTP {r.status_code}: {r.text[:200]}")
+        return {"ok": ok, "status_code": r.status_code, "response": body}
+    except Exception as e:
+        engine.log(f"BUY ERROR: {req.ticker}: {e}")
+        return {"ok": False, "error": str(e)}
