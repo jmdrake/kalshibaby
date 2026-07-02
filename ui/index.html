@@ -43,9 +43,47 @@
     <!-- Buy candidates -->
     <section class="card wide" style="margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div class="card-title" style="margin:0">Buy Candidates <span class="muted" style="font-weight:400;font-size:12px">(entry zone 70–80¢)</span></div>
-        <button class="small muted-btn" onclick="refreshCandidates()">Scan</button>
+        <div style="display:flex;align-items:center;gap:16px">
+          <div class="card-title" style="margin:0">Buy Candidates</div>
+          <div class="candidates-mode-toggle">
+            <label class="radio-label">
+              <input type="radio" name="candidatesMode" value="structural" checked onchange="onCandidatesModeChange(this.value)" />
+              Structural Setup
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="candidatesMode" value="wapner" onchange="onCandidatesModeChange(this.value)" />
+              &#x23F0; Wapner Window
+            </label>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input id="scanEventTicker" type="text" placeholder="Event ticker (auto)"
+            style="width:180px;font-size:0.85em;padding:2px 6px"
+            title="Leave blank to auto-detect, or type e.g. KXGOLDD-26JUL0217" />
+          <span id="wapnerAutoRefresh" style="display:none;font-size:11px;color:#888">
+            auto-refresh <span id="wapnerCountdown">30</span>s
+          </span>
+          <button class="small muted-btn" id="candidatesScanBtn" onclick="refreshCandidates()">Scan</button>
+        </div>
       </div>
+
+      <div id="structuralHint" class="muted" style="font-size:11px;margin-bottom:6px">
+        Entry zone 70-80c -- contracts priced for bracket/butterfly construction.
+      </div>
+      <div id="wapnerHint" style="display:none;font-size:11px;margin-bottom:6px">
+        <span style="color:#e67e22;font-weight:600">&#x23F0; Wapner Window</span>
+        <span class="muted"> -- high-probability arb: settlement &lt;60 min, mid 85-97c, spot cushion &gt;$8.</span>
+      </div>
+
+      <div id="wapnerParams" style="display:none;margin-bottom:8px">
+        <span class="muted" style="font-size:11px">
+          Min mid: <input id="wapnerMinMid" type="number" step="0.01" value="0.85" style="width:48px;font-size:11px" />
+          Max mid: <input id="wapnerMaxMid" type="number" step="0.01" value="0.97" style="width:48px;font-size:11px" />
+          Min cushion $: <input id="wapnerMinCushion" type="number" step="1" value="8" style="width:40px;font-size:11px" />
+          Max min to settle: <input id="wapnerMaxMinutes" type="number" step="5" value="60" style="width:40px;font-size:11px" />
+        </span>
+      </div>
+
       <div id="candidatesContainer"><span class="muted">Press Scan to search open markets.</span></div>
     </section>
 

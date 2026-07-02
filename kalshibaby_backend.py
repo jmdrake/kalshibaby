@@ -1959,6 +1959,188 @@ async def api_buy_candidates(event_ticker: Optional[str] = None):
 
 
 # ---------------------------------------------------------------------------
+# Wapner Window scanner — high-probability late-settlement arb candidates
+# ---------------------------------------------------------------------------
+
+@app.get("/api/wapner_candidates")
+async def api_wapner_candidates(
+    event_ticker: Optional[str] = None,
+    min_mid: float = 0.85,
+    max_mid: float = 0.97,
+    min_cushion: float = 8.0,
+    max_minutes: float = 60.0,
+):
+    """
+    Scans open markets for late-settlement arb candidates (the 'Wapner Window').
+
+    Criteria:
+    - Settlement within max_minutes (default 60)
+    - Contract mid between min_mid and max_mid (default 85-97¢)
+    - Spot cushion >= min_cushion from strike (default $8)
+    - Spot moving AWAY from strike (safe direction)
+
+    Returns candidates sorted by expected value (probability × net payout),
+    best opportunities first.
+
+    Query params:
+        event_ticker  — scan one specific event (optional)
+        min_mid       — minimum contract mid price (default 0.85)
+        max_mid       — maximum contract mid price (default 0.97)
+        min_cushion   — minimum spot distance from strike in $ (default 8.0)
+        max_minutes   — maximum minutes to settlement (default 60)
+    """
+    candidates = []
+    now = datetime.now(timezone.utc)
+
+    # Build scan list
+    if event_ticker:
+        eng = engine.event_engines.get(event_ticker)
+        scan_list = [(event_ticker, eng)]
+    else:
+        scan_list = list(engine.event_engines.items())
+
+    if not scan_list:
+        return {
+            "candidates": [],
+            "params": {
+                "min_mid": min_mid, "max_mid": max_mid,
+                "min_cushion": min_cushion, "max_minutes": max_minutes,
+            },
+            "hint": "No active events tracked. Pass ?event_ticker=KXGOLDD-26JUL0217",
+        }
+
+    def _flt(v: Any) -> Optional[float]:
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def _parse_settlement_minutes(et: str) -> Optional[float]:
+        """
+        Parse settlement time from event ticker suffix and return minutes remaining.
+        Format: PREFIX-YYMONDDHH  e.g. KXGOLDD-26JUL0217 = Jul 2 2026 17:00 UTC
+        Returns None if unparseable or already past settlement.
+        """
+        import re
+        month_map = {
+            "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
+            "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12,
+        }
+        # Try YYMONDDH H format (e.g. 26JUL0217)
+        m = re.search(r"(\d{2})([A-Z]{3})(\d{2})(\d{2})$", et)
+        if not m:
+            return None
+        try:
+            from datetime import timedelta
+            # Settlement hour is EDT (UTC-4)
+            settle_utc = datetime(
+                2000 + int(m.group(1)),
+                month_map[m.group(2)],
+                int(m.group(3)),
+                int(m.group(4)),
+                0, 0,
+                tzinfo=timezone(timedelta(hours=-4)),
+            ).astimezone(timezone.utc)
+            delta = (settle_utc - now).total_seconds() / 60.0
+            return round(delta, 1) if delta > 0 else None
+        except Exception:
+            return None
+
+    for et, eng in scan_list:
+        minutes_left = _parse_settlement_minutes(et)
+        if minutes_left is None or minutes_left > max_minutes:
+            continue
+
+        spot = eng.consensus_price() if eng else None
+
+        url = engine.kalshi.base_url + "/trade-api/v2/markets"
+        try:
+            r = requests.get(
+                url,
+                params={"event_ticker": et, "status": "open", "limit": 200},
+                timeout=8,
+            )
+            if not r.ok:
+                continue
+            markets = r.json().get("markets", [])
+        except Exception:
+            continue
+
+        for m in markets:
+            ticker = m.get("ticker", "")
+            strike = parse_strike(ticker)
+
+            for side in ("yes", "no"):
+                bid_key = f"{side}_bid_dollars"
+                ask_key = f"{side}_ask_dollars"
+                bid = _flt(m.get(bid_key))
+                ask = _flt(m.get(ask_key))
+                if bid is None or ask is None:
+                    continue
+                mid = (bid + ask) / 2 if (bid > 0 and ask > 0) else bid or ask
+                if mid <= 0:
+                    continue
+
+                # Price zone filter
+                if not (min_mid <= mid <= max_mid):
+                    continue
+
+                # Spot cushion filter
+                if spot is None:
+                    continue
+                if side == "yes":
+                    cushion = spot - strike   # positive = spot above strike = winning
+                else:
+                    cushion = strike - spot   # positive = spot below strike = winning
+
+                if cushion < min_cushion:
+                    continue
+
+                # Expected value: mid is the market's implied probability.
+                # Net payout per contract = $1 - ask (cost to buy at ask).
+                # EV = mid * (1 - ask) — simplified, ignores fee.
+                fee = round(min(0.07, max(0.01, ask * KALSHI_FEE_RATE)), 4)
+                cost = round((ask or mid) + fee, 4)
+                net_payout = round(1.0 - cost, 4)
+                ev = round(mid * net_payout, 4)
+
+                # Suggested limit buy: 1-2¢ below current ask for fill probability
+                suggested_limit = round(max(min_mid, (ask or mid) - 0.02), 2)
+
+                candidates.append({
+                    "ticker": ticker,
+                    "event_ticker": et,
+                    "side": side,
+                    "strike": strike,
+                    "bid": round(bid, 4),
+                    "ask": round(ask, 4),
+                    "mid": round(mid, 4),
+                    "spot": round(spot, 2),
+                    "cushion": round(cushion, 2),
+                    "minutes_left": minutes_left,
+                    "fee_per_contract": fee,
+                    "cost_per_contract": cost,
+                    "net_payout_per_contract": net_payout,
+                    "expected_value": ev,
+                    "suggested_limit": suggested_limit,
+                })
+
+    # Sort by expected value descending — best opportunities first
+    candidates.sort(key=lambda c: -c["expected_value"])
+
+    return {
+        "candidates": candidates,
+        "params": {
+            "min_mid": min_mid,
+            "max_mid": max_mid,
+            "min_cushion": min_cushion,
+            "max_minutes": max_minutes,
+        },
+        "scanned_events": len(scan_list),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Execute buy order
 # ---------------------------------------------------------------------------
 

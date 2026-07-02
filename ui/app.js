@@ -561,34 +561,110 @@ async function setMode(mode) {
 }
 
 // ---------------------------------------------------------------------------
-// Buy candidates
+// Buy candidates — Structural Setup and Wapner Window modes
 // ---------------------------------------------------------------------------
+
+// Track current scan mode and Wapner auto-refresh timer
+let _candidatesMode = "structural";   // "structural" | "wapner"
+let _wapnerTimer = null;
+let _wapnerCountdown = 30;
+
+function onCandidatesModeChange(mode) {
+  _candidatesMode = mode;
+
+  const structHint  = document.getElementById("structuralHint");
+  const wapnerHint  = document.getElementById("wapnerHint");
+  const wapnerParam = document.getElementById("wapnerParams");
+  const wapnerAR    = document.getElementById("wapnerAutoRefresh");
+
+  if (mode === "wapner") {
+    if (structHint)  structHint.style.display  = "none";
+    if (wapnerHint)  wapnerHint.style.display  = "block";
+    if (wapnerParam) wapnerParam.style.display  = "block";
+    if (wapnerAR)    wapnerAR.style.display     = "inline";
+    _startWapnerAutoRefresh();
+  } else {
+    if (structHint)  structHint.style.display  = "block";
+    if (wapnerHint)  wapnerHint.style.display  = "none";
+    if (wapnerParam) wapnerParam.style.display  = "none";
+    if (wapnerAR)    wapnerAR.style.display     = "none";
+    _stopWapnerAutoRefresh();
+  }
+
+  // Clear results and prompt fresh scan
+  const container = document.getElementById("candidatesContainer");
+  if (container) container.innerHTML = '<span class="muted">Press Scan to search open markets.</span>';
+}
+
+function _startWapnerAutoRefresh() {
+  _stopWapnerAutoRefresh();
+  _wapnerCountdown = 30;
+  _wapnerTimer = setInterval(() => {
+    _wapnerCountdown--;
+    const el = document.getElementById("wapnerCountdown");
+    if (el) el.textContent = _wapnerCountdown;
+    if (_wapnerCountdown <= 0) {
+      _wapnerCountdown = 30;
+      refreshCandidates();
+    }
+  }, 1000);
+}
+
+function _stopWapnerAutoRefresh() {
+  if (_wapnerTimer) { clearInterval(_wapnerTimer); _wapnerTimer = null; }
+}
 
 async function refreshCandidates() {
   const container = document.getElementById("candidatesContainer");
   container.innerHTML = '<span class="muted">Scanning...</span>';
 
-  // Use the manually entered ticker first, then fall back to first active event
+  // Reset countdown on manual scan
+  _wapnerCountdown = 30;
+  const cdEl = document.getElementById("wapnerCountdown");
+  if (cdEl) cdEl.textContent = 30;
+
+  // Determine event ticker
   let et = (document.getElementById("scanEventTicker")?.value || "").trim();
   if (!et && window._lastStatus) {
     const eventKeys = Object.keys(window._lastStatus.events || {});
     if (eventKeys.length > 0) et = eventKeys[0];
   }
 
-  const url = et ? `/api/buy_candidates?event_ticker=${encodeURIComponent(et)}` : "/api/buy_candidates";
   try {
-    const r = await fetch(url);
-    const data = await r.json();
-    if (data.hint) {
-      container.innerHTML = `<span class="muted">${data.hint}</span>`;
-      return;
+    if (_candidatesMode === "wapner") {
+      // Wapner Window mode
+      const minMid     = document.getElementById("wapnerMinMid")?.value     || 0.85;
+      const maxMid     = document.getElementById("wapnerMaxMid")?.value     || 0.97;
+      const minCushion = document.getElementById("wapnerMinCushion")?.value || 8;
+      const maxMinutes = document.getElementById("wapnerMaxMinutes")?.value || 60;
+
+      let url = `/api/wapner_candidates?min_mid=${minMid}&max_mid=${maxMid}&min_cushion=${minCushion}&max_minutes=${maxMinutes}`;
+      if (et) url += `&event_ticker=${encodeURIComponent(et)}`;
+
+      const r = await fetch(url);
+      const data = await r.json();
+      if (data.hint) {
+        container.innerHTML = `<span class="muted">${data.hint}</span>`;
+        return;
+      }
+      renderWapnerCandidates(data.candidates || [], data.params || {});
+    } else {
+      // Structural Setup mode (original behavior)
+      const url = et ? `/api/buy_candidates?event_ticker=${encodeURIComponent(et)}` : "/api/buy_candidates";
+      const r = await fetch(url);
+      const data = await r.json();
+      if (data.hint) {
+        container.innerHTML = `<span class="muted">${data.hint}</span>`;
+        return;
+      }
+      renderCandidates(data.candidates || []);
     }
-    renderCandidates(data.candidates || []);
   } catch (e) {
     container.innerHTML = `<span class="negative">Error: ${e}</span>`;
   }
 }
 
+// Structural Setup renderer (unchanged behavior)
 function renderCandidates(candidates) {
   const container = document.getElementById("candidatesContainer");
   if (!candidates.length) {
@@ -615,6 +691,62 @@ function renderCandidates(candidates) {
     </tr>`;
   });
   html += "</table>";
+  container.innerHTML = html;
+}
+
+// Wapner Window renderer — new columns + alert highlight
+let _prevWapnerTickers = new Set();
+
+function renderWapnerCandidates(candidates, params) {
+  const container = document.getElementById("candidatesContainer");
+
+  if (!candidates.length) {
+    container.innerHTML = '<span class="muted">No Wapner Window candidates found. Market may be too far from settlement or cushion too tight.</span>';
+    _prevWapnerTickers = new Set();
+    return;
+  }
+
+  // Detect new candidates since last scan (for alert highlight)
+  const currentTickers = new Set(candidates.map(c => c.ticker + c.side));
+  const hasNew = [...currentTickers].some(k => !_prevWapnerTickers.has(k));
+  _prevWapnerTickers = currentTickers;
+
+  let html = `<table><tr>
+    <th>Ticker</th><th>Side</th><th>Strike</th><th>Mid</th>
+    <th>Spot</th><th>Cushion $</th><th>Min Left</th>
+    <th>Cost/ct</th><th>Net Payout</th><th>EV</th><th>Limit</th><th></th>
+  </tr>`;
+
+  candidates.forEach((c) => {
+    // Highlight rows with high EV
+    const rowStyle = c.expected_value >= 0.05 ? ' style="background:rgba(230,126,34,0.12)"' : "";
+    const evCls    = c.expected_value >= 0.05  ? "positive" : "muted";
+    const minLeft  = c.minutes_left < 15 ? `<b style="color:#e74c3c">${c.minutes_left}</b>` : c.minutes_left.toFixed(0);
+
+    html += `<tr${rowStyle}>
+      <td style="font-size:11px">${c.ticker.split("-T")[1] || c.ticker}</td>
+      <td>${c.side.toUpperCase()}</td>
+      <td>${fmt(c.strike)}</td>
+      <td><b>${fmt(c.mid, 2)}</b></td>
+      <td>${fmt(c.spot)}</td>
+      <td class="positive">+${fmt(c.cushion, 2)}</td>
+      <td>${minLeft} min</td>
+      <td class="muted">$${c.cost_per_contract.toFixed(3)}</td>
+      <td class="positive">$${c.net_payout_per_contract.toFixed(3)}</td>
+      <td class="${evCls}">${c.expected_value.toFixed(4)}</td>
+      <td class="muted">${fmt(c.suggested_limit, 2)}</td>
+      <td><button class="small" style="background:#e67e22" onclick="promptBuy('${c.ticker}','${c.side}',${c.mid})">Buy</button></td>
+    </tr>`;
+  });
+  html += "</table>";
+
+  // Flash the container if new candidates appeared
+  if (hasNew) {
+    container.style.transition = "background 0.3s";
+    container.style.background = "rgba(230,126,34,0.18)";
+    setTimeout(() => { container.style.background = ""; }, 800);
+  }
+
   container.innerHTML = html;
 }
 
@@ -750,30 +882,4 @@ document.getElementById("setLiveBtn").addEventListener("click", () => setMode("l
 refresh();
 setInterval(refresh, 3000);
 
-// ---------------------------------------------------------------------------
-// Inject event ticker input next to Scan button (no HTML change needed)
-// ---------------------------------------------------------------------------
-(function injectScanInput() {
-  function doInject() {
-    const scanBtn = Array.from(document.querySelectorAll("button")).find(
-      b => b.textContent.trim() === "Scan"
-    );
-    if (!scanBtn) return;
-    if (document.getElementById("scanEventTicker")) return; // already injected
-
-    const input = document.createElement("input");
-    input.id = "scanEventTicker";
-    input.type = "text";
-    input.placeholder = "Event ticker (auto)";
-    input.style.cssText = "width:220px; margin-right:6px; font-size:0.85em; padding:2px 6px;";
-    input.title = "Leave blank to auto-detect from active events, or type e.g. KXBRENTD-26JUN2917";
-    scanBtn.parentNode.insertBefore(input, scanBtn);
-  }
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", doInject);
-  } else {
-    doInject();
-    // Retry after a short delay in case the button is rendered dynamically
-    setTimeout(doInject, 500);
-  }
-})();
+// scanEventTicker input is now declared directly in index.html
