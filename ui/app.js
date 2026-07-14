@@ -104,7 +104,7 @@ function updateEventChart(et, eventStatus) {
 
   const bySource = {};
   eventStatus.prices.forEach((p) => { bySource[p.source] = p.price; });
-  hist.oilprice.push(bySource["oilprice"] ?? bySource["goldprice"] ?? null);
+  hist.oilprice.push(bySource["oilprice"] ?? bySource["goldprice"] ?? bySource["silverprice"] ?? null);
   hist.yahoo.push(bySource["yahoo"] ?? null);
   hist.kalshi_implied.push(bySource["kalshi_implied"] ?? null);
 
@@ -229,10 +229,12 @@ function renderEventStatus(et, es) {
               </div>
               <div class="bot-panel-row">
                 <label><input type="checkbox" id="bp_harvest_${cssId(p.ticker)}"> Momentum harvest</label>
-                <span class="muted" style="font-size:11px">Sell on reversal after peak (noise-resistant)</span>
-                <label style="margin-left:12px">Sensitivity
-                  <input type="number" id="bp_sensitivity_${cssId(p.ticker)}" step="1" min="1" max="10" value="3" style="width:50px">
-                </label>
+                <label style="margin-left:12px">Floor $<input type="number" id="bp_harvest_floor_${cssId(p.ticker)}" step="0.01" min="0.01" max="0.99" placeholder="e.g. 0.95" style="width:80px"></label>
+                <label>Min Profit ¢<input type="number" id="bp_harvest_min_profit_${cssId(p.ticker)}" step="1" min="1" max="50" value="2" style="width:60px"></label>
+                <label>Time (s)<input type="number" id="bp_harvest_time_${cssId(p.ticker)}" step="1" min="0" max="3600" value="30" style="width:60px"></label>
+              </div>
+              <div class="bot-panel-row" style="padding-left: 24px;">
+                <span class="muted" style="font-size:11px">Floor: absolute min sell price. Min Profit: must be at least this much in the green. Time: seconds price must hold above floor (noise filter).</span>
               </div>
               <div class="bot-panel-row">
                 <label><input type="checkbox" id="bp_timeexit_on_${cssId(p.ticker)}"> Time exit</label>
@@ -267,10 +269,13 @@ function renderEventStatus(et, es) {
         ticker: matchTicker,
         stoploss_on:   document.getElementById('bp_stoploss_on_'  + tid)?.checked,
         stoploss:      document.getElementById('bp_stoploss_'     + tid)?.value,
+        cushion:       document.getElementById('bp_cushion_'      + tid)?.value, // Added missing cushion snapshot
         limit_on:      document.getElementById('bp_limit_on_'     + tid)?.checked,
         limit:         document.getElementById('bp_limit_'        + tid)?.value,
         harvest:       document.getElementById('bp_harvest_'      + tid)?.checked,
-        sensitivity:   document.getElementById('bp_sensitivity_'  + tid)?.value,
+        harvest_floor: document.getElementById('bp_harvest_floor_' + tid)?.value,
+        harvest_min_profit: document.getElementById('bp_harvest_min_profit_' + tid)?.value,
+        harvest_time:  document.getElementById('bp_harvest_time_' + tid)?.value,
         timeexit_on:   document.getElementById('bp_timeexit_on_'  + tid)?.checked,
         timeexit:      document.getElementById('bp_timeexit_'     + tid)?.value,
       };
@@ -289,10 +294,13 @@ function renderEventStatus(et, es) {
       const setV = (id, v) => { const e = document.getElementById(id); if (e && v != null) e.value  = v; };
       setC('bp_stoploss_on_'  + tid, snap.stoploss_on);
       setV('bp_stoploss_'     + tid, snap.stoploss);
+      setV('bp_cushion_'      + tid, snap.cushion); // Restoring cushion
       setC('bp_limit_on_'     + tid, snap.limit_on);
       setV('bp_limit_'        + tid, snap.limit);
       setC('bp_harvest_'      + tid, snap.harvest);
-      setV('bp_sensitivity_'  + tid, snap.sensitivity);
+      setV('bp_harvest_floor_' + tid, snap.harvest_floor);
+      setV('bp_harvest_min_profit_' + tid, snap.harvest_min_profit);
+      setV('bp_harvest_time_' + tid, snap.harvest_time);
       setC('bp_timeexit_on_'  + tid, snap.timeexit_on);
       setV('bp_timeexit_'     + tid, snap.timeexit);
     });
@@ -614,6 +622,14 @@ function _stopWapnerAutoRefresh() {
   if (_wapnerTimer) { clearInterval(_wapnerTimer); _wapnerTimer = null; }
 }
 
+// ---------------------------------------------------------------------------
+// Replaces refreshCandidates() entirely (the old inline wapner block was
+// unreachable dead code — delete it, along with the old
+// renderWapnerCandidates() if nothing else calls it).
+// Also replace the first four lines of refreshWapnerCandidates() with the
+// version at the bottom so it accepts the event filter.
+// ---------------------------------------------------------------------------
+
 async function refreshCandidates() {
   const container = document.getElementById("candidatesContainer");
   container.innerHTML = '<span class="muted">Scanning...</span>';
@@ -623,45 +639,54 @@ async function refreshCandidates() {
   const cdEl = document.getElementById("wapnerCountdown");
   if (cdEl) cdEl.textContent = 30;
 
-  // Determine event ticker
-  let et = (document.getElementById("scanEventTicker")?.value || "").trim();
-  if (!et && window._lastStatus) {
-    const eventKeys = Object.keys(window._lastStatus.events || {});
-    if (eventKeys.length > 0) et = eventKeys[0];
-  }
+  const et = (document.getElementById("scanEventTicker")?.value || "").trim();
 
   try {
     if (_candidatesMode === "wapner") {
-      // Wapner Window mode
-      const minMid     = document.getElementById("wapnerMinMid")?.value     || 0.85;
-      const maxMid     = document.getElementById("wapnerMaxMid")?.value     || 0.97;
-      const minCushion = document.getElementById("wapnerMinCushion")?.value || 8;
-      const maxMinutes = document.getElementById("wapnerMaxMinutes")?.value || 60;
-
-      let url = `/api/wapner_candidates?min_mid=${minMid}&max_mid=${maxMid}&min_cushion=${minCushion}&max_minutes=${maxMinutes}`;
-      if (et) url += `&event_ticker=${encodeURIComponent(et)}`;
-
-      const r = await fetch(url);
-      const data = await r.json();
-      if (data.hint) {
-        container.innerHTML = `<span class="muted">${data.hint}</span>`;
-        return;
-      }
-      renderWapnerCandidates(data.candidates || [], data.params || {});
-    } else {
-      // Structural Setup mode (original behavior)
-      const url = et ? `/api/buy_candidates?event_ticker=${encodeURIComponent(et)}` : "/api/buy_candidates";
-      const r = await fetch(url);
-      const data = await r.json();
-      if (data.hint) {
-        container.innerHTML = `<span class="muted">${data.hint}</span>`;
-        return;
-      }
-      renderCandidates(data.candidates || []);
+      // Blank ticker = scan ALL tracked events. Deliberate: gold and Brent
+      // dailies settle at the same 5pm ET, so the window opens everywhere
+      // at once and you want every PASS, not just the first event's.
+      return await refreshWapnerCandidates(et || null);
     }
+
+    // Structural Setup mode (original behavior, incl. first-event fallback)
+    let structEt = et;
+    if (!structEt && window._lastStatus) {
+      const keys = Object.keys(window._lastStatus.events || {});
+      if (keys.length > 0) structEt = keys[0];
+    }
+    const url = structEt
+      ? `/api/buy_candidates?event_ticker=${encodeURIComponent(structEt)}`
+      : "/api/buy_candidates";
+    const r = await fetch(url);
+    const data = await r.json();
+    if (data.hint) {
+      container.innerHTML = `<span class="muted">${data.hint}</span>`;
+      return;
+    }
+    renderCandidates(data.candidates || []);
   } catch (e) {
     container.innerHTML = `<span class="negative">Error: ${e}</span>`;
   }
+}
+
+// --- refreshWapnerCandidates: change its opening to accept the filter ------
+async function refreshWapnerCandidates(eventTicker) {
+  const container = document.getElementById("candidatesContainer");
+  if (!container) return;
+  container.innerHTML = '<span class="muted">Scanning Wapner window…</span>';
+  const url = "/api/wapner_candidates" +
+    (eventTicker ? "?event_ticker=" + encodeURIComponent(eventTicker) : "");
+  let data;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    data = await r.json();
+  } catch (e) {
+    container.innerHTML = '<span class="muted">Wapner scan failed: ' + e.message + "</span>";
+    return;
+  }
+  container.innerHTML = renderWapnerResults(data.candidates || {});
 }
 
 // Structural Setup renderer (unchanged behavior)
@@ -774,6 +799,10 @@ function populateBotPanel(ticker, cfg) {
   const id = cssId(ticker);
   const setCheck = (elId, val) => { const el = document.getElementById(elId); if (el) el.checked = !!val; };
   const setVal   = (elId, val) => { const el = document.getElementById(elId); if (el && val != null) el.value = val; };
+  setCheck('bp_harvest_'      + id, cfg.harvest);
+  setVal  ('bp_harvest_floor_' + id, cfg.harvest_floor);
+  setVal  ('bp_harvest_min_profit_' + id, cfg.harvest_min_profit);
+  setVal  ('bp_harvest_time_' + id, cfg.harvest_time_to_exit);
   setCheck('bp_stoploss_on_'  + id, cfg.stop_loss  != null);
   setVal  ('bp_stoploss_'     + id, cfg.stop_loss);
   setVal  ('bp_cushion_'      + id, cfg.strike_cushion);
@@ -823,7 +852,9 @@ async function saveBotPanel(eventTicker, ticker) {
     strike_cushion:      getPrice('bp_cushion_' + id) || null,
     limit_sell:          getCheck('bp_limit_on_'     + id) ? getPrice('bp_limit_'    + id)   : null,
     harvest:             getCheck('bp_harvest_'      + id),
-    harvest_sensitivity: parseInt(document.getElementById('bp_sensitivity_' + id)?.value ?? '3'),
+    harvest_floor:       getCheck('bp_harvest_'      + id) ? getPrice('bp_harvest_floor_' + id) : null,
+    harvest_min_profit:  getCheck('bp_harvest_'      + id) ? parseInt(document.getElementById('bp_harvest_min_profit_' + id)?.value ?? '2') : null,
+    harvest_time_to_exit:getCheck('bp_harvest_'      + id) ? parseInt(document.getElementById('bp_harvest_time_' + id)?.value ?? '30') : null,
     time_exit:           getCheck('bp_timeexit_on_'  + id) ? getStr('bp_timeexit_' + id)   : null,
   };
 

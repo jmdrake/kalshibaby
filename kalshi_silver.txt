@@ -1,0 +1,362 @@
+
+Active markets in KXSILVERD series for 26JUL0817:
+- KXSILVERD-26JUL0817-T65.75: Will the silver close price be above 65.75 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0000
+  Volume:   0.00
+
+- KXSILVERD-26JUL0817-T65.50: Will the silver close price be above 65.50 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0000
+  Volume:   0.00
+
+- KXSILVERD-26JUL0817-T65.25: Will the silver close price be above 65.25 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0500
+  Volume:   100.00
+
+- KXSILVERD-26JUL0817-T65: Will the silver close price be above 65 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0600
+  Volume:   100.00
+
+- KXSILVERD-26JUL0817-T64.75: Will the silver close price be above 64.75 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0600
+  Volume:   350.00
+
+- KXSILVERD-26JUL0817-T64.50: Will the silver close price be above 64.50 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0200
+  Volume:   259.00
+
+- KXSILVERD-26JUL0817-T64.25: Will the silver close price be above 64.25 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0700
+  Volume:   9.00
+
+- KXSILVERD-26JUL0817-T64: Will the silver close price be above 64 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0200
+  Volume:   276.00
+
+- KXSILVERD-26JUL0817-T63.75: Will the silver close price be above 63.75 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0100
+  Volume:   362.63
+
+- KXSILVERD-26JUL0817-T63.50: Will the silver close price be above 63.50 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0100
+  Volume:   267.63
+
+- KXSILVERD-26JUL0817-T63.25: Will the silver close price be above 63.25 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0200
+  NO bid:   $0.9800
+  NO ask:   $1.0000
+  Last:     $0.0100
+  Volume:   4324.05
+
+- KXSILVERD-26JUL0817-T63: Will the silver close price be above 63 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0200
+  NO bid:   $0.9800
+  NO ask:   $1.0000
+  Last:     $0.0100
+  Volume:   1028.00
+
+- KXSILVERD-26JUL0817-T62.75: Will the silver close price be above 62.75 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0200
+  NO bid:   $0.9800
+  NO ask:   $1.0000
+  Last:     $0.0100
+  Volume:   1032.00
+
+- KXSILVERD-26JUL0817-T62.50: Will the silver close price be above 62.50 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0200
+  NO bid:   $0.9800
+  NO ask:   $1.0000
+  Last:     $0.0100
+  Volume:   1322.37
+
+- KXSILVERD-26JUL0817-T62.25: Will the silver close price be above 62.25 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0200
+  NO bid:   $0.9800
+  NO ask:   $1.0000
+  Last:     $0.0100
+  Volume:   1494.00
+
+- KXSILVERD-26JUL0817-T62: Will the silver close price be above 62 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0200
+  YES ask:  $0.0300
+  NO bid:   $0.9700
+  NO ask:   $0.9800
+  Last:     $0.0200
+  Volume:   1209.34
+
+- KXSILVERD-26JUL0817-T61.75: Will the silver close price be above 61.75 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0200
+  NO bid:   $0.9800
+  NO ask:   $1.0000
+  Last:     $0.0100
+  Volume:   810.56
+
+- KXSILVERD-26JUL0817-T61.50: Will the silver close price be above 61.50 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0200
+  YES ask:  $0.0300
+  NO bid:   $0.9700
+  NO ask:   $0.9800
+  Last:     $0.0200
+  Volume:   344.64
+
+- KXSILVERD-26JUL0817-T61.25: Will the silver close price be above 61.25 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0200
+  YES ask:  $0.0300
+  NO bid:   $0.9700
+  NO ask:   $0.9800
+  Last:     $0.0200
+  Volume:   668.72
+
+- KXSILVERD-26JUL0817-T61: Will the silver close price be above 61 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0200
+  YES ask:  $0.0300
+  NO bid:   $0.9700
+  NO ask:   $0.9800
+  Last:     $0.0300
+  Volume:   552.30
+
+- KXSILVERD-26JUL0817-T60.75: Will the silver close price be above 60.75 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0400
+  YES ask:  $0.0500
+  NO bid:   $0.9500
+  NO ask:   $0.9600
+  Last:     $0.0500
+  Volume:   924.04
+
+- KXSILVERD-26JUL0817-T60.50: Will the silver close price be above 60.50 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0400
+  YES ask:  $0.0500
+  NO bid:   $0.9500
+  NO ask:   $0.9600
+  Last:     $0.0600
+  Volume:   604.03
+
+- KXSILVERD-26JUL0817-T60.25: Will the silver close price be above 60.25 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0400
+  YES ask:  $0.0500
+  NO bid:   $0.9500
+  NO ask:   $0.9600
+  Last:     $0.0700
+  Volume:   677.69
+
+- KXSILVERD-26JUL0817-T60: Will the silver close price be above 60 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0500
+  YES ask:  $0.0700
+  NO bid:   $0.9300
+  NO ask:   $0.9500
+  Last:     $0.0600
+  Volume:   2397.56
+
+- KXSILVERD-26JUL0817-T59.75: Will the silver close price be above 59.75 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.0800
+  YES ask:  $0.1000
+  NO bid:   $0.9000
+  NO ask:   $0.9200
+  Last:     $0.1100
+  Volume:   1287.31
+
+- KXSILVERD-26JUL0817-T59.50: Will the silver close price be above 59.50 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.1300
+  YES ask:  $0.1600
+  NO bid:   $0.8400
+  NO ask:   $0.8700
+  Last:     $0.1800
+  Volume:   602.53
+
+- KXSILVERD-26JUL0817-T59.25: Will the silver close price be above 59.25 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.2100
+  YES ask:  $0.2300
+  NO bid:   $0.7700
+  NO ask:   $0.7900
+  Last:     $0.2200
+  Volume:   642.89
+
+- KXSILVERD-26JUL0817-T59: Will the silver close price be above 59 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.2600
+  YES ask:  $0.3000
+  NO bid:   $0.7000
+  NO ask:   $0.7400
+  Last:     $0.2600
+  Volume:   1324.59
+
+- KXSILVERD-26JUL0817-T58.75: Will the silver close price be above 58.75 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.3600
+  YES ask:  $0.3900
+  NO bid:   $0.6100
+  NO ask:   $0.6400
+  Last:     $0.3500
+  Volume:   488.15
+
+- KXSILVERD-26JUL0817-T58.50: Will the silver close price be above 58.50 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.4700
+  YES ask:  $0.5000
+  NO bid:   $0.5000
+  NO ask:   $0.5300
+  Last:     $0.5300
+  Volume:   674.27
+
+- KXSILVERD-26JUL0817-T58.25: Will the silver close price be above 58.25 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.5700
+  YES ask:  $0.6000
+  NO bid:   $0.4000
+  NO ask:   $0.4300
+  Last:     $0.6000
+  Volume:   494.89
+
+- KXSILVERD-26JUL0817-T58: Will the silver close price be above 58 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.6500
+  YES ask:  $0.6900
+  NO bid:   $0.3100
+  NO ask:   $0.3500
+  Last:     $0.7000
+  Volume:   1262.03
+
+- KXSILVERD-26JUL0817-T57.75: Will the silver close price be above 57.75 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.7300
+  YES ask:  $0.7600
+  NO bid:   $0.2400
+  NO ask:   $0.2700
+  Last:     $0.7700
+  Volume:   1049.56
+
+- KXSILVERD-26JUL0817-T57.50: Will the silver close price be above 57.50 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.7800
+  YES ask:  $0.8100
+  NO bid:   $0.1900
+  NO ask:   $0.2200
+  Last:     $0.8000
+  Volume:   604.61
+
+- KXSILVERD-26JUL0817-T57.25: Will the silver close price be above 57.25 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.8300
+  YES ask:  $0.8700
+  NO bid:   $0.1300
+  NO ask:   $0.1700
+  Last:     $0.8600
+  Volume:   222.46
+
+- KXSILVERD-26JUL0817-T57: Will the silver close price be above 57 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.8600
+  YES ask:  $0.9000
+  NO bid:   $0.1000
+  NO ask:   $0.1400
+  Last:     $0.8500
+  Volume:   483.47
+
+- KXSILVERD-26JUL0817-T56.75: Will the silver close price be above 56.75 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.9100
+  YES ask:  $0.9300
+  NO bid:   $0.0700
+  NO ask:   $0.0900
+  Last:     $0.8900
+  Volume:   400.56
+
+- KXSILVERD-26JUL0817-T56.50: Will the silver close price be above 56.50 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.9300
+  YES ask:  $0.9400
+  NO bid:   $0.0600
+  NO ask:   $0.0700
+  Last:     $0.9200
+  Volume:   568.48
+
+- KXSILVERD-26JUL0817-T56.25: Will the silver close price be above 56.25 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.9400
+  YES ask:  $0.9600
+  NO bid:   $0.0400
+  NO ask:   $0.0600
+  Last:     $0.9700
+  Volume:   188.22
+
+- KXSILVERD-26JUL0817-T56: Will the silver close price be above 56 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXSILVERD-26JUL0817
+  YES bid:  $0.9600
+  YES ask:  $0.9700
+  NO bid:   $0.0300
+  NO ask:   $0.0400
+  Last:     $0.9800
+  Volume:   223.02
+

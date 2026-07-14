@@ -1,0 +1,137 @@
+
+Active markets in KXWTI series for 26JUL0814:
+- KXWTI-26JUL0814-T75.99: Will the WTI crude oil settlement price be above 75.99 USD/Bbl on Jul 8, 2026?
+  Event: KXWTI-26JUL0814
+  YES bid:  $0.0800
+  YES ask:  $0.0900
+  NO bid:   $0.9100
+  NO ask:   $0.9200
+  Last:     $0.0800
+  Volume:   28805.06
+
+- KXWTI-26JUL0814-T74.99: Will the WTI crude oil settlement price be above 74.99 USD/Bbl on Jul 8, 2026?
+  Event: KXWTI-26JUL0814
+  YES bid:  $0.2000
+  YES ask:  $0.2100
+  NO bid:   $0.7900
+  NO ask:   $0.8000
+  Last:     $0.2100
+  Volume:   106832.30
+
+- KXWTI-26JUL0814-T73.99: Will the WTI crude oil settlement price be above 73.99 USD/Bbl on Jul 8, 2026?
+  Event: KXWTI-26JUL0814
+  YES bid:  $0.5500
+  YES ask:  $0.5700
+  NO bid:   $0.4300
+  NO ask:   $0.4500
+  Last:     $0.5700
+  Volume:   52420.50
+
+- KXWTI-26JUL0814-T72.99: Will the WTI crude oil settlement price be above 72.99 USD/Bbl on Jul 8, 2026?
+  Event: KXWTI-26JUL0814
+  YES bid:  $0.8500
+  YES ask:  $0.8600
+  NO bid:   $0.1400
+  NO ask:   $0.1500
+  Last:     $0.8600
+  Volume:   56398.97
+
+- KXWTI-26JUL0814-T71.99: Will the WTI crude oil settlement price be above 71.99 USD/Bbl on Jul 8, 2026?
+  Event: KXWTI-26JUL0814
+  YES bid:  $0.9400
+  YES ask:  $0.9500
+  NO bid:   $0.0500
+  NO ask:   $0.0600
+  Last:     $0.9400
+  Volume:   42487.06
+
+- KXWTI-26JUL0814-T70.99: Will the WTI crude oil settlement price be above 70.99 USD/Bbl on Jul 8, 2026?
+  Event: KXWTI-26JUL0814
+  YES bid:  $0.9700
+  YES ask:  $0.9800
+  NO bid:   $0.0200
+  NO ask:   $0.0300
+  Last:     $0.9700
+  Volume:   33224.00
+
+- KXWTI-26JUL0814-T69.99: Will the WTI crude oil settlement price be above 69.99 USD/Bbl on Jul 8, 2026?
+  Event: KXWTI-26JUL0814
+  YES bid:  $0.9800
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0200
+  Last:     $0.9900
+  Volume:   11600.80
+
+- KXWTI-26JUL0814-T68.99: Will the WTI crude oil settlement price be above 68.99 USD/Bbl on Jul 8, 2026?
+  Event: KXWTI-26JUL0814
+  YES bid:  $0.9800
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0200
+  Last:     $0.9900
+  Volume:   6001.09
+
+- KXWTI-26JUL0814-T67.99: Will the WTI crude oil settlement price be above 67.99 USD/Bbl on Jul 8, 2026?
+  Event: KXWTI-26JUL0814
+  YES bid:  $0.9900
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0100
+  Last:     $0.9800
+  Volume:   2817.68
+
+- KXWTI-26JUL0814-T66.99: Will the WTI crude oil settlement price be above 66.99 USD/Bbl on Jul 8, 2026?
+  Event: KXWTI-26JUL0814
+  YES bid:  $0.9900
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0100
+  Last:     $0.9900
+  Volume:   1292.73
+
+- KXWTI-26JUL0814-T65.99: Will the WTI crude oil settlement price be above 65.99 USD/Bbl on Jul 8, 2026?
+  Event: KXWTI-26JUL0814
+  YES bid:  $0.9900
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0100
+  Last:     $0.9900
+  Volume:   2307.47
+
+- KXWTI-26JUL0814-T64.99: Will the WTI crude oil settlement price be above 64.99 USD/Bbl on Jul 8, 2026?
+  Event: KXWTI-26JUL0814
+  YES bid:  $0.9900
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0100
+  Last:     $0.9900
+  Volume:   787.38
+
+- KXWTI-26JUL0814-T63.99: Will the WTI crude oil settlement price be above 63.99 USD/Bbl on Jul 8, 2026?
+  Event: KXWTI-26JUL0814
+  YES bid:  $0.9900
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0100
+  Last:     $0.9900
+  Volume:   300.00
+
+- KXWTI-26JUL0814-T62.99: Will the WTI crude oil settlement price be above 62.99 USD/Bbl on Jul 8, 2026?
+  Event: KXWTI-26JUL0814
+  YES bid:  $0.9900
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0100
+  Last:     $0.9900
+  Volume:   1963.67
+
+- KXWTI-26JUL0814-T61.99: Will the WTI crude oil settlement price be above 61.99 USD/Bbl on Jul 8, 2026?
+  Event: KXWTI-26JUL0814
+  YES bid:  $0.9900
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0100
+  Last:     $0.9900
+  Volume:   1016.53
+

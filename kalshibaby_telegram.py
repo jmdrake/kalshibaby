@@ -1,0 +1,995 @@
+#!/usr/bin/env python3
+"""
+KalshiBaby Telegram Bot — mobile command and alert interface.
+
+Bridges the KalshiBaby v3 backend to your phone via Telegram.
+
+v2 CHANGES (five-gate Wapner integration):
+  - /wapner now runs the same five-gate checklist as the dashboard and the
+    /api/wapner_candidates endpoint (wapner_checklist.py). One evaluator,
+    three views, zero drift.
+  - /wapner shows PASS candidates only; /wapner all names failed gates.
+  - Auto-alerts fire on exactly two transitions:
+        REJECT/absent -> PASS   (window opened — includes size cap + exit)
+        PASS -> REJECT          (gate broke — if you entered, exit bell)
+    Candidates that vanish because the market settled clear silently.
+  - telegram.wapner_min_mid / wapner_min_cushion / wapner_max_minutes are
+    RETIRED. Gates live only in the top-level wapner: block of config.yaml.
+    A warning is logged if the old keys are still present.
+  - If an EventEngine has no settlement_time (portfolio-synced events), the
+    bot backfills it by parsing the event ticker, so Gate 1 always works.
+
+Features:
+  PUSH alerts (bot → you):
+    - Wapner Window PASS detected (with size cap and exit trigger)
+    - Wapner gate broke on a previously passing candidate
+    - Stop loss fired (with confirm/cancel buttons)
+    - Settlement approaching (15-min warning)
+    - Global drawdown limit approaching
+    - Morning session brief (7:00am)
+
+  PULL commands (you → bot):
+    /status        — all positions and P/L
+    /price         — current consensus prices per event
+    /wapner        — Wapner PASS candidates ( /wapner all → include rejects )
+    /stop <ticker> <price> — set stop loss on a position
+    /clearstop <ticker>    — remove stop loss
+    /sell <ticker>         — sell position (asks confirmation)
+    /arm <event_ticker>    — arm an event
+    /disarm <event_ticker> — disarm an event
+    /mode paper|live       — switch execution mode
+    /help          — command reference
+
+Setup:
+  1. Message @BotFather on Telegram, create a bot, copy the token.
+  2. Get your Telegram chat ID: message @userinfobot or start the bot
+     and check logs for your chat_id.
+  3. Add to config.yaml:
+       telegram:
+         token: "123456:ABC-your-token-here"
+         allowed_chat_ids:
+           - 987654321        # your personal chat ID
+         morning_brief_time: "07:00"   # local time HH:MM
+       wapner:                # top-level block — shared with the dashboard
+         max_minutes: 60
+         min_mid: 0.85
+         max_mid: 0.97
+         cushion_vol_multiple: 3.0
+         trend_lookback_minutes: 20
+         vol_lookback_minutes: 60
+         min_history_minutes: 15
+         max_loss_dollars: 10.0
+         exit_cushion_fraction: 0.5
+  4. pip install python-telegram-bot --break-system-packages
+  5. Import and start in kalshibaby_backend.py lifespan (see bottom of file).
+
+Dependencies:
+  python-telegram-bot >= 20.0  (async API)
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+from datetime import datetime, timezone, timedelta
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
+
+from wapner_checklist import evaluate_event_wapner
+
+logger = logging.getLogger(__name__)
+
+try:
+    from telegram import (
+        Bot,
+        Update,
+        InlineKeyboardButton,
+        InlineKeyboardMarkup,
+    )
+    from telegram.ext import (
+        Application,
+        CommandHandler,
+        CallbackQueryHandler,
+        ContextTypes,
+    )
+    from telegram.constants import ParseMode
+    TELEGRAM_AVAILABLE = True
+except ImportError:
+    TELEGRAM_AVAILABLE = False
+    logger.warning(
+        "python-telegram-bot not installed. "
+        "Run: pip install python-telegram-bot --break-system-packages"
+    )
+
+if TYPE_CHECKING:
+    from kalshibaby_backend import Engine
+
+
+# ---------------------------------------------------------------------------
+# Emoji constants — keeps message formatting readable
+# ---------------------------------------------------------------------------
+EMOJI = {
+    "money":    "💰",
+    "warn":     "⚠️",
+    "danger":   "🚨",
+    "info":     "ℹ️",
+    "clock":    "⏰",
+    "chart":    "📊",
+    "up":       "📈",
+    "down":     "📉",
+    "check":    "✅",
+    "cross":    "❌",
+    "fire":     "🔥",
+    "shield":   "🛡️",
+    "news":     "📰",
+    "gold":     "🏅",
+    "oil":      "🛢️",
+    "gear":     "⚙️",
+    "wall":     "🧱",
+    "target":   "🎯",
+}
+
+_MONTH_MAP = {
+    "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
+    "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12,
+}
+
+
+def _fmt_price(p: Optional[float], decimals: int = 2) -> str:
+    return f"{p:.{decimals}f}" if p is not None else "—"
+
+
+def _fmt_pl(pl: Optional[float]) -> str:
+    if pl is None:
+        return "—"
+    sign = "+" if pl >= 0 else ""
+    return f"{sign}${pl:.2f}"
+
+
+def _cents(price: float) -> str:
+    return f"{price * 100:.0f}¢"
+
+
+def parse_settlement_from_ticker(event_ticker: str) -> Optional[datetime]:
+    """KXBRENTD-26JUL0617 -> 2026-07-06 17:00 ET. None if unparseable."""
+    m = re.search(r"(\d{2})([A-Z]{3})(\d{2})(\d{2})$", event_ticker)
+    if not m:
+        return None
+    try:
+        return datetime(
+            2000 + int(m.group(1)),
+            _MONTH_MAP[m.group(2)],
+            int(m.group(3)),
+            int(m.group(4)), 0, 0,
+            tzinfo=timezone(timedelta(hours=-4)),
+        )
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# KalshiBabyBot
+# ---------------------------------------------------------------------------
+
+class KalshiBabyBot:
+    """
+    Telegram bot that wraps the KalshiBaby Engine.
+
+    Lifecycle:
+        bot = KalshiBabyBot(engine, config["telegram"])
+        await bot.start()          # call from lifespan
+        # ... engine runs ...
+        await bot.stop()           # call on shutdown
+    """
+
+    def __init__(self, engine: "Engine", telegram_cfg: Dict) -> None:
+        self.engine              = engine
+        self.token               = telegram_cfg["token"]
+        self.allowed_ids: Set[int] = {
+            int(cid) for cid in telegram_cfg.get("allowed_chat_ids", [])
+        }
+        self.morning_time        = telegram_cfg.get("morning_brief_time", "07:00")
+
+        # Retired keys — gates live in the top-level wapner: block now.
+        for dead in ("wapner_min_mid", "wapner_min_cushion", "wapner_max_minutes"):
+            if dead in telegram_cfg:
+                logger.warning(
+                    f"config telegram.{dead} is retired and IGNORED — "
+                    f"the five gates live in the top-level wapner: block."
+                )
+
+        # Wapner transition tracking: (ticker, side) -> first-PASS timestamp
+        self._wapner_live: Dict[Tuple[str, str], float] = {}
+        # Misc one-shot alert keys (settlement warnings, drawdown warning)
+        self._alerted_misc: Set[str] = set()
+        # Pending sell confirmations: callback_id → (eng, position, qty)
+        self._pending_sells: Dict[str, tuple] = {}
+
+        self._app: Optional[Application] = None
+        self._poll_task: Optional[asyncio.Task] = None
+        self._morning_task: Optional[asyncio.Task] = None
+
+    # -----------------------------------------------------------------------
+    # Lifecycle
+    # -----------------------------------------------------------------------
+
+    async def start(self) -> None:
+        if not TELEGRAM_AVAILABLE:
+            logger.warning("Telegram bot disabled — python-telegram-bot not installed.")
+            return
+        if not self.token or self.token == "YOUR_TOKEN_HERE":
+            logger.warning("Telegram bot disabled — no token configured.")
+            return
+
+        self._app = (
+            Application.builder()
+            .token(self.token)
+            .build()
+        )
+        self._register_handlers()
+        await self._app.initialize()
+        await self._app.start()
+        await self._app.updater.start_polling(drop_pending_updates=True)
+
+        # Background tasks
+        self._poll_task    = asyncio.create_task(self._alert_loop())
+        self._morning_task = asyncio.create_task(self._morning_brief_loop())
+        logger.info("Telegram bot started.")
+
+    async def stop(self) -> None:
+        if self._poll_task:
+            self._poll_task.cancel()
+        if self._morning_task:
+            self._morning_task.cancel()
+        if self._app:
+            await self._app.updater.stop()
+            await self._app.stop()
+            await self._app.shutdown()
+        logger.info("Telegram bot stopped.")
+
+    # -----------------------------------------------------------------------
+    # Handler registration
+    # -----------------------------------------------------------------------
+
+    def _register_handlers(self) -> None:
+        app = self._app
+        app.add_handler(CommandHandler("start",   self._cmd_start))
+        app.add_handler(CommandHandler("help",    self._cmd_help))
+        app.add_handler(CommandHandler("status",  self._cmd_status))
+        app.add_handler(CommandHandler("price",   self._cmd_price))
+        app.add_handler(CommandHandler("wapner",  self._cmd_wapner))
+        app.add_handler(CommandHandler("stop",    self._cmd_set_stop))
+        app.add_handler(CommandHandler("clearstop", self._cmd_clear_stop))
+        app.add_handler(CommandHandler("sell",    self._cmd_sell))
+        app.add_handler(CommandHandler("arm",     self._cmd_arm))
+        app.add_handler(CommandHandler("disarm",  self._cmd_disarm))
+        app.add_handler(CommandHandler("mode",    self._cmd_mode))
+        app.add_handler(CallbackQueryHandler(self._on_callback))
+
+    # -----------------------------------------------------------------------
+    # Auth guard
+    # -----------------------------------------------------------------------
+
+    def _authorized(self, update: Update) -> bool:
+        cid = update.effective_chat.id
+        if self.allowed_ids and cid not in self.allowed_ids:
+            logger.warning(f"Unauthorized Telegram access attempt from chat_id={cid}")
+            return False
+        return True
+
+    async def _send(self, chat_id: int, text: str, reply_markup=None) -> None:
+        """Send a message, swallowing errors so a bad send doesn't crash the engine."""
+        try:
+            await self._app.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup,
+            )
+        except Exception as e:
+            logger.error(f"Telegram send failed: {e}")
+
+    async def _broadcast(self, text: str, reply_markup=None, **_ignored) -> None:
+        """Send to all allowed chat IDs."""
+        for cid in self.allowed_ids:
+            await self._send(cid, text, reply_markup)
+
+    # -----------------------------------------------------------------------
+    # Wapner checklist bridge
+    # -----------------------------------------------------------------------
+
+    def _ensure_settlement_time(self, eng) -> None:
+        """Backfill settlement_time for portfolio-synced events (Gate 1 needs it)."""
+        if eng.settlement_time is None:
+            st = parse_settlement_from_ticker(eng.event_ticker)
+            if st is not None:
+                eng.settlement_time = st
+
+    def _minutes_left(self, eng) -> Optional[float]:
+        self._ensure_settlement_time(eng)
+        if eng.settlement_time is None:
+            return None
+        now = datetime.now(eng.settlement_time.tzinfo or timezone.utc)
+        return (eng.settlement_time - now).total_seconds() / 60.0
+
+    def _scan_wapner(self, only_in_window: bool) -> Tuple[List[dict], List[dict], List[str]]:
+        """
+        Run the five-gate evaluator across events.
+        Returns (passes, rejects, errors). Blocking — call via asyncio.to_thread.
+        only_in_window=True skips events whose window can't be open yet
+        (alert loop); False evaluates everything (manual /wapner).
+        """
+        passes: List[dict] = []
+        rejects: List[dict] = []
+        errors: List[str] = []
+        for et, eng in list(self.engine.event_engines.items()):
+            mins = self._minutes_left(eng)
+            if only_in_window and (mins is None or mins <= 0 or mins > 75):
+                continue
+            try:
+                for c in evaluate_event_wapner(self.engine, eng):
+                    if not c.get("ticker"):
+                        # event-level rejection (e.g. no settlement_time)
+                        rejects.append({"ticker": et, "side": "", "mid": 0,
+                                        "checks": {}, "grade": "REJECT",
+                                        "reasons": c.get("reasons", [])})
+                    elif c.get("grade") == "PASS":
+                        passes.append(c)
+                    else:
+                        rejects.append(c)
+            except Exception as e:
+                errors.append(f"{et}: scan error {e}")
+        return passes, rejects, errors
+
+    def _fmt_pass(self, c: dict) -> str:
+        s = c.get("sizing", {})
+        win = s.get("win_net_per_contract") or 0
+        return (
+            f"{EMOJI['check']} <b>PASS</b> <code>{c['ticker']}</code> "
+            f"{c['side'].upper()} @ {_cents(c['mid'])}\n"
+            f"  {EMOJI['clock']} {c['minutes_left']:.0f} min · spot {c['spot']} · "
+            f"cushion {c['cushion']} vs move {c['expected_remaining_move']}\n"
+            f"  {EMOJI['target']} Size cap <b>{s.get('max_contracts')}</b> "
+            f"(max loss ${s.get('max_loss_dollars')}) · win {round(win * 100)}¢/ct · "
+            f"one loss ≈ {s.get('wins_erased_by_one_loss')} wins\n"
+            f"  {EMOJI['shield']} Exit if spot crosses <b>{c['exit_trigger_spot']}</b>"
+            f" — set it NOW:\n"
+            f"  <code>/stop {c['ticker']} …</code>"
+        )
+
+    def _fmt_reject(self, c: dict) -> str:
+        failed = [k for k, v in (c.get("checks") or {}).items() if not v]
+        gates = ", ".join(failed) if failed else "; ".join(c.get("reasons", [])) or "event"
+        mid = f" @ {_cents(c['mid'])}" if c.get("mid") else ""
+        return (
+            f"{EMOJI['cross']} <code>{c['ticker']}</code> "
+            f"{(c.get('side') or '').upper()}{mid} — REJECT ({gates})"
+        )
+
+    # -----------------------------------------------------------------------
+    # Commands
+    # -----------------------------------------------------------------------
+
+    async def _cmd_start(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._authorized(update):
+            return
+        await update.message.reply_text(
+            f"{EMOJI['fire']} <b>KalshiBaby v3</b> connected!\n"
+            f"Chat ID: <code>{update.effective_chat.id}</code>\n\n"
+            f"Type /help for commands.",
+            parse_mode=ParseMode.HTML,
+        )
+
+    async def _cmd_help(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._authorized(update):
+            return
+        text = (
+            f"{EMOJI['gear']} <b>KalshiBaby Commands</b>\n\n"
+            f"/status — positions and P/L\n"
+            f"/price — consensus prices\n"
+            f"/wapner — five-gate PASS candidates\n"
+            f"/wapner all — include rejects with failed gates\n"
+            f"/stop &lt;ticker&gt; &lt;price&gt; — set stop loss\n"
+            f"  e.g. /stop KXGOLDD-26JUL0217-T4039 0.75\n"
+            f"/clearstop &lt;ticker&gt; — remove stop loss\n"
+            f"/sell &lt;ticker&gt; — sell position (confirms first)\n"
+            f"/arm &lt;event_ticker&gt; — arm event\n"
+            f"/disarm &lt;event_ticker&gt; — disarm event\n"
+            f"/mode paper|live — switch execution mode\n"
+            f"/help — this message\n"
+        )
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
+    async def _cmd_status(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._authorized(update):
+            return
+        status = self.engine.status()
+        if not status.events:
+            await update.message.reply_text(
+                f"{EMOJI['info']} No active events.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        lines = [f"{EMOJI['chart']} <b>KalshiBaby Status</b> ({status.mode.upper()})\n"]
+        for et, es in status.events.items():
+            r = es.risk
+            armed = "🟢 ARMED" if es.armed else "⚪ DISARMED"
+            lines.append(f"<b>{et}</b> {armed}")
+            lines.append(
+                f"  Consensus: <b>{_fmt_price(es.consensus_price)}</b> | "
+                f"State: {es.state}"
+            )
+            lines.append(
+                f"  Cost: {_fmt_pl(r.cost_basis)} | "
+                f"Mark: {_fmt_pl(r.mark_value)} | "
+                f"P/L: <b>{_fmt_pl(r.unrealized_pl)}</b>"
+            )
+            if es.positions:
+                lines.append("  <i>Positions:</i>")
+                for p in es.positions:
+                    if p.count <= 0:
+                        continue
+                    pl = p.count * ((p.current_bid or p.current_mid) - p.avg_price)
+                    lines.append(
+                        f"    {p.side.upper()} >{p.strike} ×{p.count} "
+                        f"@ {_cents(p.avg_price)} | "
+                        f"mid {_cents(p.current_mid)} | "
+                        f"{_fmt_pl(pl)}"
+                    )
+            lines.append("")
+
+        await update.message.reply_text(
+            "\n".join(lines),
+            parse_mode=ParseMode.HTML,
+        )
+
+    async def _cmd_price(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._authorized(update):
+            return
+        status = self.engine.status()
+        if not status.events:
+            await update.message.reply_text(f"{EMOJI['info']} No active events.")
+            return
+
+        lines = [f"{EMOJI['chart']} <b>Consensus Prices</b>\n"]
+        for et, es in status.events.items():
+            lines.append(f"<b>{et}</b>")
+            lines.append(f"  Consensus: <b>{_fmt_price(es.consensus_price)}</b>")
+            for p in es.prices:
+                stale = " ⚠️STALE" if p.stale else ""
+                lines.append(
+                    f"  {p.source}: {_fmt_price(p.price)}{stale}"
+                )
+            lines.append("")
+
+        await update.message.reply_text(
+            "\n".join(lines),
+            parse_mode=ParseMode.HTML,
+        )
+
+    async def _cmd_wapner(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._authorized(update):
+            return
+        show_all = bool(ctx.args) and ctx.args[0].lower() == "all"
+        passes, rejects, errors = await asyncio.to_thread(
+            self._scan_wapner, False
+        )
+
+        lines = [f"{EMOJI['clock']} <b>Wapner Window</b> — five-gate scan\n"]
+        if passes:
+            lines += [self._fmt_pass(c) for c in passes]
+        else:
+            lines.append(
+                f"{EMOJI['wall']} No PASS candidates right now.\n"
+                f"Rejections are the system working — no trade is a result."
+            )
+        if show_all and rejects:
+            lines.append("")
+            lines += [self._fmt_reject(c) for c in rejects[:15]]
+            if len(rejects) > 15:
+                lines.append(f"…+{len(rejects) - 15} more rejects.")
+        elif rejects:
+            lines.append(
+                f"\n{EMOJI['info']} {len(rejects)} strike(s) rejected. "
+                f"/wapner all to see the failed gates."
+            )
+        lines += errors
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+    async def _cmd_set_stop(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._authorized(update):
+            return
+        args = ctx.args or []
+        if len(args) < 2:
+            await update.message.reply_text(
+                f"Usage: /stop &lt;ticker&gt; &lt;price&gt;\n"
+                f"e.g. /stop KXGOLDD-26JUL0217-T4039 0.75",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        ticker = args[0]
+        try:
+            price = float(args[1])
+            if price > 1:
+                price = price / 100  # accept cents input e.g. 75 → 0.75
+        except ValueError:
+            await update.message.reply_text(f"Invalid price: {args[1]}")
+            return
+
+        # Find position and set bot config
+        found = False
+        for eng in self.engine.event_engines.values():
+            p = next((x for x in eng.positions if x.ticker == ticker), None)
+            if p:
+                self.engine.position_bots[ticker] = {
+                    "event_ticker": eng.event_ticker,
+                    "stop_loss": price,
+                    "harvest": False,
+                }
+                found = True
+                await update.message.reply_text(
+                    f"{EMOJI['shield']} Stop loss set: "
+                    f"<b>{ticker}</b> @ {_cents(price)}",
+                    parse_mode=ParseMode.HTML,
+                )
+                break
+
+        if not found:
+            await update.message.reply_text(
+                f"{EMOJI['cross']} Position not found: {ticker}"
+            )
+
+    async def _cmd_clear_stop(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._authorized(update):
+            return
+        args = ctx.args or []
+        if not args:
+            await update.message.reply_text("Usage: /clearstop &lt;ticker&gt;", parse_mode=ParseMode.HTML)
+            return
+        ticker = args[0]
+        removed = self.engine.position_bots.pop(ticker, None)
+        if removed:
+            await update.message.reply_text(
+                f"{EMOJI['check']} Stop loss cleared: <b>{ticker}</b>",
+                parse_mode=ParseMode.HTML,
+            )
+        else:
+            await update.message.reply_text(
+                f"{EMOJI['info']} No bot config found for {ticker}"
+            )
+
+    async def _cmd_sell(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._authorized(update):
+            return
+        args = ctx.args or []
+        if not args:
+            await update.message.reply_text("Usage: /sell &lt;ticker&gt;", parse_mode=ParseMode.HTML)
+            return
+        ticker = args[0]
+
+        # Find position
+        for eng in self.engine.event_engines.values():
+            p = next((x for x in eng.positions if x.ticker == ticker), None)
+            if p:
+                # Prefix "manual_" so _on_callback routes this through the
+                # confirm_manual_ / cancel_manual_ branch. Was "sell_", which
+                # matched no branch and made /sell buttons silently dead.
+                callback_id = f"manual_{ticker}"
+                self._pending_sells[callback_id] = (eng, p, p.count)
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton(
+                        f"✅ Sell {p.count} {p.side.upper()} {ticker}",
+                        callback_data=f"confirm_{callback_id}",
+                    ),
+                    InlineKeyboardButton(
+                        "❌ Cancel",
+                        callback_data=f"cancel_{callback_id}",
+                    ),
+                ]])
+                await update.message.reply_text(
+                    f"{EMOJI['warn']} <b>Confirm sell?</b>\n"
+                    f"Ticker: {ticker}\n"
+                    f"Side: {p.side.upper()}\n"
+                    f"Qty: {p.count}\n"
+                    f"Avg: {_cents(p.avg_price)} | Mid: {_cents(p.current_mid)}\n"
+                    f"Est P/L: {_fmt_pl(p.count * (p.current_mid - p.avg_price))}",
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=keyboard,
+                )
+                return
+
+        await update.message.reply_text(
+            f"{EMOJI['cross']} Position not found: {ticker}"
+        )
+
+    async def _cmd_arm(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._authorized(update):
+            return
+        args = ctx.args or []
+        if not args:
+            await update.message.reply_text("Usage: /arm &lt;event_ticker&gt;", parse_mode=ParseMode.HTML)
+            return
+        et = args[0]
+        try:
+            self.engine.arm_event(et, True)
+            await update.message.reply_text(
+                f"{EMOJI['fire']} <b>{et}</b> ARMED",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception as e:
+            await update.message.reply_text(f"{EMOJI['cross']} Error: {e}")
+
+    async def _cmd_disarm(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._authorized(update):
+            return
+        args = ctx.args or []
+        if not args:
+            await update.message.reply_text("Usage: /disarm &lt;event_ticker&gt;", parse_mode=ParseMode.HTML)
+            return
+        et = args[0]
+        try:
+            self.engine.arm_event(et, False)
+            await update.message.reply_text(
+                f"{EMOJI['shield']} <b>{et}</b> DISARMED",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception as e:
+            await update.message.reply_text(f"{EMOJI['cross']} Error: {e}")
+
+    async def _cmd_mode(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._authorized(update):
+            return
+        args = ctx.args or []
+        if not args or args[0] not in ("paper", "live"):
+            await update.message.reply_text(
+                "Usage: /mode paper|live\n\n"
+                f"Current mode: <b>{self.engine.params.mode.upper()}</b>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        if args[0] == "live":
+            # Require explicit confirmation for live mode via inline button
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Yes, go LIVE", callback_data="confirm_setlive"),
+                InlineKeyboardButton("❌ Cancel",       callback_data="cancel_setlive"),
+            ]])
+            await update.message.reply_text(
+                f"{EMOJI['danger']} Switch to <b>LIVE mode</b>? "
+                f"Real orders will be sent when events are armed.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard,
+            )
+        else:
+            self.engine.params.mode = "paper"
+            await update.message.reply_text(
+                f"{EMOJI['shield']} Mode set to <b>PAPER</b>",
+                parse_mode=ParseMode.HTML,
+            )
+
+    # -----------------------------------------------------------------------
+    # Inline keyboard callbacks
+    # -----------------------------------------------------------------------
+
+    async def _on_callback(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        await query.answer()
+
+        if not self._authorized(update):
+            return
+
+        data = query.data
+
+        # Sell confirmation — handles both manual /sell and automated bot requests.
+        # Pending tuples are (eng, position, qty) for manual, or
+        # (eng, position, qty, alerted_ts) for auto — unpack tolerantly.
+        if data.startswith("confirm_auto_") or data.startswith("confirm_manual_"):
+            callback_id = data[len("confirm_"):]
+            pending = self._pending_sells.pop(callback_id, None)
+            if not pending:
+                await query.edit_message_text(f"{EMOJI['cross']} Sell request expired or already handled.")
+                return
+            eng, p, qty = pending[0], pending[1], pending[2]
+            await eng._execute_sell(p, qty)
+            await query.edit_message_text(
+                f"{EMOJI['check']} <b>SELL executed</b>: "
+                f"{qty} {p.side.upper()} {p.ticker}",
+                parse_mode=ParseMode.HTML,
+            )
+
+        elif data.startswith("cancel_auto_") or data.startswith("cancel_manual_"):
+            callback_id = data[len("cancel_"):]
+            self._pending_sells.pop(callback_id, None)
+            await query.edit_message_text(f"{EMOJI['cross']} Sell cancelled.")
+        # Stop loss confirmation (fired by bot)
+        elif data.startswith("confirm_stop_"):
+            ticker = data[len("confirm_stop_"):]
+            for eng in self.engine.event_engines.values():
+                p = next((x for x in eng.positions if x.ticker == ticker), None)
+                if p:
+                    await eng._execute_sell(p, p.count)
+                    await query.edit_message_text(
+                        f"{EMOJI['check']} <b>Stop loss executed</b>: "
+                        f"{p.count} {p.side.upper()} {ticker}",
+                        parse_mode=ParseMode.HTML,
+                    )
+                    return
+            await query.edit_message_text(
+                f"{EMOJI['cross']} Position no longer found: {ticker}"
+            )
+
+        elif data.startswith("cancel_stop_"):
+            ticker = data[len("cancel_stop_"):]
+            await query.edit_message_text(
+                f"{EMOJI['cross']} Stop loss <b>SKIPPED</b> for {ticker}. "
+                f"Monitor manually.",
+                parse_mode=ParseMode.HTML,
+            )
+
+        # Live mode confirmation
+        elif data == "confirm_setlive":
+            self.engine.params.mode = "live"
+            await query.edit_message_text(
+                f"{EMOJI['danger']} Mode set to <b>LIVE</b>. "
+                f"Real orders will execute when events are armed.",
+                parse_mode=ParseMode.HTML,
+            )
+
+        elif data == "cancel_setlive":
+            await query.edit_message_text(
+                f"{EMOJI['shield']} Mode change cancelled. Still in "
+                f"<b>{self.engine.params.mode.upper()}</b>.",
+                parse_mode=ParseMode.HTML,
+            )
+
+    # -----------------------------------------------------------------------
+    # Alert loop — runs every 30 seconds alongside the engine tick
+    # -----------------------------------------------------------------------
+
+    async def _alert_loop(self) -> None:
+        """
+        Background loop that checks for alertable conditions every 30 seconds.
+        Intentionally runs slower than the engine tick (3s) to avoid spam.
+        """
+        await asyncio.sleep(10)  # Let engine initialize first
+        while True:
+            try:
+                await self._check_wapner_alerts()
+                await self._check_settlement_warnings()
+                await self._check_drawdown_alert()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Alert loop error: {e}")
+            await asyncio.sleep(30)
+
+    async def _check_wapner_alerts(self) -> None:
+        """
+        Five-gate transition alerts:
+          REJECT/absent -> PASS : entry window opened (full card, once)
+          PASS -> REJECT        : gate broke — if you entered, that's the bell
+        Candidates that vanish entirely (market settled/closed) clear silently.
+        """
+        passes, rejects, _errors = await asyncio.to_thread(self._scan_wapner, True)
+
+        evaluated: Dict[Tuple[str, str], dict] = {}
+        for c in passes + rejects:
+            if c.get("ticker") and c.get("side"):
+                evaluated[(c["ticker"], c["side"])] = c
+
+        # New passes
+        for c in passes:
+            key = (c["ticker"], c["side"])
+            if key not in self._wapner_live:
+                self._wapner_live[key] = datetime.now(timezone.utc).timestamp()
+                await self._broadcast(
+                    f"🔔 <b>Wapner Window open</b>\n\n{self._fmt_pass(c)}"
+                )
+
+        # Broken gates on previously-passing candidates
+        for key in list(self._wapner_live):
+            c = evaluated.get(key)
+            if c is None:
+                self._wapner_live.pop(key, None)   # settled/closed — silent
+            elif c.get("grade") != "PASS":
+                self._wapner_live.pop(key, None)
+                failed = [k for k, v in (c.get("checks") or {}).items() if not v]
+                await self._broadcast(
+                    f"{EMOJI['warn']} <b>Gate broke</b> on "
+                    f"<code>{key[0]}</code> {key[1].upper()}: "
+                    f"{', '.join(failed) or 'unknown'}.\n"
+                    f"If you entered this one, the setup no longer exists — "
+                    f"exit, don't hope. /status to check, /sell to act."
+                )
+
+    async def _check_settlement_warnings(self) -> None:
+        """Warn 15 minutes before settlement if positions are open."""
+        for et, eng in self.engine.event_engines.items():
+            if not eng.positions:
+                continue
+            mins_left = self._minutes_left(eng)
+            if mins_left is None:
+                continue
+            warn_key = f"settle_warn_{et}"
+            if 13 <= mins_left <= 17 and warn_key not in self._alerted_misc:
+                self._alerted_misc.add(warn_key)
+                r = eng.risk_snapshot()
+                await self._broadcast(
+                    f"{EMOJI['clock']} <b>Settlement in ~15 min</b>\n"
+                    f"Event: {et}\n"
+                    f"Mark: {_fmt_pl(r.mark_value)} | "
+                    f"Max profit: {_fmt_pl(r.max_profit)}\n"
+                    f"Positions: YES×{r.yes_count} NO×{r.no_count}",
+                )
+
+    async def _check_drawdown_alert(self) -> None:
+        """Alert when approaching global drawdown limit."""
+        snapshots = [e.risk_snapshot() for e in self.engine.event_engines.values()]
+        total_cost = sum(s.cost_basis for s in snapshots)
+        total_pl   = sum(s.unrealized_pl for s in snapshots)
+        if total_cost <= 0:
+            return
+        pct = (total_pl / total_cost) * 100.0
+        limit = self.engine.params.safety.get("global_drawdown_limit", -50.0)
+        warn_threshold = limit * 0.75  # warn at 75% of limit
+        warn_key = "drawdown_warn"
+        if pct <= warn_threshold and warn_key not in self._alerted_misc:
+            self._alerted_misc.add(warn_key)
+            await self._broadcast(
+                f"{EMOJI['danger']} <b>Drawdown warning</b>\n"
+                f"Portfolio P/L: <b>{pct:.1f}%</b> "
+                f"(limit: {limit:.1f}%)\n"
+                f"Consider reducing exposure.",
+            )
+        # Reset warning if recovered above threshold
+        if pct > warn_threshold and warn_key in self._alerted_misc:
+            self._alerted_misc.discard(warn_key)
+
+    # -----------------------------------------------------------------------
+    # Morning brief loop
+    # -----------------------------------------------------------------------
+
+    async def _morning_brief_loop(self) -> None:
+        """Send a morning session brief at configured time each day."""
+        while True:
+            try:
+                now = datetime.now()
+                h, m = self.morning_time.split(":")
+                target = now.replace(
+                    hour=int(h), minute=int(m), second=0, microsecond=0
+                )
+                if target <= now:
+                    target = target + timedelta(days=1)
+                wait_seconds = (target - now).total_seconds()
+                await asyncio.sleep(wait_seconds)
+                await self._send_morning_brief()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Morning brief error: {e}")
+                await asyncio.sleep(60)
+
+    async def _send_morning_brief(self) -> None:
+        status = self.engine.status()
+        today = datetime.now().strftime("%A, %b %d")
+        lines = [
+            f"{EMOJI['news']} <b>KalshiBaby Morning Brief</b> — {today}\n",
+            f"Mode: <b>{status.mode.upper()}</b>",
+            f"Active events: <b>{len(status.events)}</b>",
+            "",
+            f"<i>Pre-trade checklist:</i>",
+            f"  1. Check gold/oil headlines (news.google.com)",
+            f"  2. Check ladder thickness before building structure",
+            f"  3. Define risk/reward envelope before entering",
+            f"  4. Wait for 7:30am data spike to settle",
+            "",
+            f"<i>Wapner reminder:</i> five gates or no trade. "
+            f"The window opens in the last hour before settlement — "
+            f"alerts will fire automatically.",
+            "",
+            f"Good luck today. /status for current positions.",
+        ]
+        await self._broadcast("\n".join(lines))
+
+    # -----------------------------------------------------------------------
+    # Stop loss confirmation alert (called by engine when stop fires in live mode)
+    # -----------------------------------------------------------------------
+
+    async def send_stop_loss_alert(self, ticker: str, side: str, qty: int,
+                                   mid: float, stop: float) -> None:
+        """
+        Called by the engine BEFORE executing a stop loss in live mode.
+        Sends a Telegram message with Confirm/Cancel buttons.
+        User has 60 seconds to respond; if no response, sell executes anyway.
+        """
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                f"✅ Execute stop sell ({qty} @ {_cents(mid)})",
+                callback_data=f"confirm_stop_{ticker}",
+            ),
+            InlineKeyboardButton(
+                "❌ Skip this time",
+                callback_data=f"cancel_stop_{ticker}",
+            ),
+        ]])
+        await self._broadcast(
+            f"{EMOJI['danger']} <b>Stop loss triggered</b>\n"
+            f"Ticker: {ticker}\n"
+            f"Side: {side.upper()} ×{qty}\n"
+            f"Mid: {_cents(mid)} | Stop: {_cents(stop)}\n\n"
+            f"Respond within 60s or sell executes automatically.",
+            reply_markup=keyboard,
+        )
+
+    # Suppress re-alerts on the same pending sell for this long (seconds).
+    # Long enough that a still-triggered condition on every 3s tick doesn't
+    # flood your phone; short enough that an ignored alert re-surfaces if the
+    # condition genuinely persists past a few minutes.
+    PENDING_REALERT_SECONDS = 300  # 5 minutes
+
+    async def request_sell_confirmation(self, eng, position, qty, reason):
+        """
+        Called by the engine when an automated (non-stop) sell condition is met.
+        Registers the sell as pending and sends a Telegram confirmation prompt.
+        The engine MUST NOT execute the sell after calling this — the sell only
+        happens when the user taps APPROVE (see _on_callback).
+
+        Dedup: if a confirmation for the same ticker is already pending and was
+        alerted recently, silently skip. Prevents flooding when a condition
+        stays true across multiple engine ticks.
+        """
+        import time as _time
+        ticker = position.ticker
+        callback_id = f"auto_{ticker}"
+
+        existing = self._pending_sells.get(callback_id)
+        if existing:
+            # existing tuples are (eng, position, qty[, alerted_ts]); newer
+            # entries carry a timestamp for re-alert throttling.
+            alerted_ts = existing[3] if len(existing) >= 4 else 0
+            if _time.time() - alerted_ts < self.PENDING_REALERT_SECONDS:
+                # Already pending, alerted recently — refresh qty/pos silently.
+                self._pending_sells[callback_id] = (eng, position, qty, alerted_ts)
+                return
+
+        now = _time.time()
+        self._pending_sells[callback_id] = (eng, position, qty, now)
+
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                f"✅ APPROVE SELL ({qty} {position.side.upper()})",
+                callback_data=f"confirm_{callback_id}",
+            ),
+            InlineKeyboardButton(
+                "❌ REJECT",
+                callback_data=f"cancel_{callback_id}",
+            ),
+        ]])
+
+        await self._broadcast(
+            f"{EMOJI['warn']} <b>Automated Sell Request</b>\n"
+            f"Ticker: <code>{ticker}</code>\n"
+            f"Reason: {reason}\n"
+            f"Qty: {qty} {position.side.upper()}\n"
+            f"Mid: {_cents(position.current_mid)}\n\n"
+            f"Waiting for your confirmation — no answer = no sale.",
+            reply_markup=keyboard,
+        )
+
+# ---------------------------------------------------------------------------
+# Backend integration (unchanged interface — no lifespan edits needed if you
+# already wired v1):
+#
+#   from kalshibaby_telegram import KalshiBabyBot
+#
+#   @asynccontextmanager
+#   async def lifespan(app: FastAPI):
+#       asyncio.create_task(engine.loop())
+#       tg_cfg = engine.config.get("telegram")
+#       bot = KalshiBabyBot(engine, tg_cfg) if tg_cfg else None
+#       if bot:
+#           await bot.start()
+#       yield
+#       if bot:
+#           await bot.stop()
+# ---------------------------------------------------------------------------

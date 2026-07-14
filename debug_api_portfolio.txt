@@ -1,0 +1,67 @@
+http://localhost:8765/api/debug/portfolio 
+
+	
+base_url	"https://api.elections.kalshi.com"
+api_key_id	"ee98f48f-8a1a-4ef7-9169-ffafacdf3d00"
+key_loaded	true
+url	"https://api.elections.kalshi.com/trade-api/v2/portfolio/positions"
+status_code	200
+body	
+cursor	""
+event_positions	
+0	
+event_exposure_dollars	"14.470000"
+event_ticker	"KXNATGASD-26JUL0717"
+fees_paid_dollars	"0.400300"
+realized_pnl_dollars	"0.000000"
+total_cost_dollars	"14.470000"
+total_cost_shares_fp	"24.00"
+market_positions	
+0	
+fees_paid_dollars	"0.062900"
+last_updated_ts	"2026-07-07T12:50:40.474617Z"
+market_exposure_dollars	"2.640000"
+position_fp	"4.00"
+realized_pnl_dollars	"0.000000"
+resting_orders_count	0
+ticker	"KXNATGASD-26JUL0717-T3.170"
+total_traded_dollars	"2.640000"
+1	
+fees_paid_dollars	"0.065300"
+last_updated_ts	"2026-07-07T12:50:52.628995Z"
+market_exposure_dollars	"2.520000"
+position_fp	"4.00"
+realized_pnl_dollars	"0.000000"
+resting_orders_count	0
+ticker	"KXNATGASD-26JUL0717-T3.175"
+total_traded_dollars	"2.520000"
+2	
+fees_paid_dollars	"0.083300"
+last_updated_ts	"2026-07-07T12:51:01.054036Z"
+market_exposure_dollars	"3.050000"
+position_fp	"5.00"
+realized_pnl_dollars	"0.000000"
+resting_orders_count	0
+ticker	"KXNATGASD-26JUL0717-T3.180"
+total_traded_dollars	"3.050000"
+3	
+fees_paid_dollars	"0.085300"
+last_updated_ts	"2026-07-07T12:50:31.005013Z"
+market_exposure_dollars	"2.900000"
+position_fp	"5.00"
+realized_pnl_dollars	"0.000000"
+resting_orders_count	0
+ticker	"KXNATGASD-26JUL0717-T3.185"
+total_traded_dollars	"2.900000"
+4	
+fees_paid_dollars	"0.103500"
+last_updated_ts	"2026-07-07T12:46:02.684216Z"
+market_exposure_dollars	"3.360000"
+position_fp	"6.00"
+realized_pnl_dollars	"0.000000"
+resting_orders_count	0
+ticker	"KXNATGASD-26JUL0717-T3.190"
+total_traded_dollars	"3.360000"
+probe_url	"https://api.elections.kalshi.com/trade-api/v2/markets?limit=1"
+probe_reachable	true
+probe_status	200

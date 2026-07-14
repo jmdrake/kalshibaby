@@ -12,6 +12,8 @@ Open:
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
+
 import math
 import time
 from bs4 import BeautifulSoup
@@ -28,6 +30,7 @@ import os
 
 import requests
 import yaml
+from wapner_checklist import evaluate_event_wapner
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -57,16 +60,19 @@ NewsRegime = Literal["NEUTRAL", "DEAL_MODE", "ESCALATION_MODE"]
 # Instrument prefix → price source symbol mapping.
 # OilPrice only covers oil products — omit oilprice_symbol for non-oil instruments.
 INSTRUMENTS: Dict[str, Dict[str, Any]] = {
-    "KXWTI":     {"yahoo_symbol": "CL=F",  "oilprice_symbol": "WTI-Crude",   "use_goldprice": False},
-    "KXWTIMAX":  {"yahoo_symbol": "CL=F",  "oilprice_symbol": "WTI-Crude",   "use_goldprice": False},
-    "KXBRENTW":  {"yahoo_symbol": "BZ=F",  "oilprice_symbol": "Brent-Crude", "use_goldprice": False},
-    "KXGOLDW":   {"yahoo_symbol": "GC=F",  "oilprice_symbol": None,          "use_goldprice": True},
-    "KXGOLD":    {"yahoo_symbol": "GC=F",  "oilprice_symbol": None,          "use_goldprice": True},
-    "KXGOLDMAX": {"yahoo_symbol": "GC=F",  "oilprice_symbol": None,          "use_goldprice": True},
-    "KXGOLDR":   {"yahoo_symbol": "GC=F",  "oilprice_symbol": None,          "use_goldprice": True},
-    "KXGOLDD":   {"yahoo_symbol": "GC=F",  "oilprice_symbol": None,          "use_goldprice": True},
-    "KXBRENTD":  {"yahoo_symbol": "BZ=F",  "oilprice_symbol": "Brent-Crude", "use_goldprice": False},
-    "KXNG":      {"yahoo_symbol": "NG=F",  "oilprice_symbol": "Natural-Gas", "use_goldprice": False},
+    "KXWTI":     {"yahoo_symbol": "CL=F",  "oilprice_symbol": "WTI-Crude",   "use_goldprice": False, "use_silverprice": False},
+    "KXWTIMAX":  {"yahoo_symbol": "CL=F",  "oilprice_symbol": "WTI-Crude",   "use_goldprice": False, "use_silverprice": False},
+    "KXBRENTW":  {"yahoo_symbol": "BZ=F",  "oilprice_symbol": "Brent-Crude", "use_goldprice": False, "use_silverprice": False},
+    "KXGOLDW":   {"yahoo_symbol": "GC=F",  "oilprice_symbol": None,          "use_goldprice": True,  "use_silverprice": False},
+    "KXGOLD":    {"yahoo_symbol": "GC=F",  "oilprice_symbol": None,          "use_goldprice": True,  "use_silverprice": False},
+    "KXGOLDMAX": {"yahoo_symbol": "GC=F",  "oilprice_symbol": None,          "use_goldprice": True,  "use_silverprice": False},
+    "KXGOLDR":   {"yahoo_symbol": "GC=F",  "oilprice_symbol": None,          "use_goldprice": True,  "use_silverprice": False},
+    "KXGOLDD":   {"yahoo_symbol": "GC=F",  "oilprice_symbol": None,          "use_goldprice": True,  "use_silverprice": False},
+    "KXBRENTD":  {"yahoo_symbol": "BZ=F",  "oilprice_symbol": "Brent-Crude", "use_goldprice": False, "use_silverprice": False},
+    "KXNG":      {"yahoo_symbol": "NG=F",  "oilprice_symbol": "Natural-Gas", "use_goldprice": False, "use_silverprice": False},
+    "KXSILVER":  {"yahoo_symbol": "SI=F",  "oilprice_symbol": None,          "use_goldprice": False, "use_silverprice": True},
+    "KXSILVERD": {"yahoo_symbol": "SI=F",  "oilprice_symbol": None,          "use_goldprice": False, "use_silverprice": True},
+    "KXSILVERW": {"yahoo_symbol": "SI=F",  "oilprice_symbol": None,          "use_goldprice": False, "use_silverprice": True},
 }
 
 
@@ -92,13 +98,15 @@ def detect_instrument(event_ticker: str) -> Dict[str, Any]:
 
     p = prefix.upper()
     if "GOLD" in p or p.startswith("KXAU"):
-        return {"yahoo_symbol": "GC=F",  "oilprice_symbol": None,           "use_goldprice": True}
+        return {"yahoo_symbol": "GC=F",  "oilprice_symbol": None,           "use_goldprice": True,  "use_silverprice": False}
+    if "SILVER" in p or p.startswith("KXAG") or p.startswith("KXSLV"):
+        return {"yahoo_symbol": "SI=F",  "oilprice_symbol": None,           "use_goldprice": False, "use_silverprice": True}
     if "WTI" in p:
-        return {"yahoo_symbol": "CL=F",  "oilprice_symbol": "WTI-Crude",    "use_goldprice": False}
+        return {"yahoo_symbol": "CL=F",  "oilprice_symbol": "WTI-Crude",    "use_goldprice": False, "use_silverprice": False}
     if "BRENT" in p or "BRT" in p:
-        return {"yahoo_symbol": "BZ=F",  "oilprice_symbol": "Brent-Crude",  "use_goldprice": False}
+        return {"yahoo_symbol": "BZ=F",  "oilprice_symbol": "Brent-Crude",  "use_goldprice": False, "use_silverprice": False}
     if p.startswith("KXNG") or "NATGAS" in p or "NGAS" in p:
-        return {"yahoo_symbol": "NG=F",  "oilprice_symbol": "Natural-Gas",  "use_goldprice": False}
+        return {"yahoo_symbol": "NG=F",  "oilprice_symbol": "Natural-Gas",  "use_goldprice": False, "use_silverprice": False}
     return {}
 
 
@@ -477,13 +485,15 @@ class NewsRegimeTracker:
                 if p.side != endangered_side:
                     continue
                 if eng.position_endangered(p, consensus):
+                    reason = f"News regime {self.regime}: endangered {p.side.upper()} position."
                     eng._add_action(
-                        "danger", "SELL_LEG",
-                        f"News regime {self.regime}: selling endangered {p.side.upper()} position.",
+                        "danger", "SELL_LEG", reason,
                         p.ticker, p.side, p.count,
                     )
-                    if params.mode == "live" and eng.armed:
-                        asyncio.create_task(eng._execute_sell(p, p.count))
+                    if params.mode == "live" and eng.armed and eng.coordinator is not None:
+                        asyncio.create_task(
+                            eng.coordinator.request_auto_sell(eng, p, p.count, reason)
+                        )
                 else:
                     # Not yet endangered but warn — cushion may be thin
                     eng._add_action(
@@ -578,18 +588,9 @@ class OilPriceSource(PriceSource):
 
 class GoldPriceSource(PriceSource):
     """
-    Gold spot price (USD/troy oz) — primary: Stooq XAUUSD CSV, fallback: gold-api.com.
-
-    Stooq notes:
-    - Do NOT include 'v' (volume) in format string — xauusd has no volume data,
-      Stooq returns 'N/D' in that column which breaks float parsing.
-      Correct URL uses &f=sd2t2ohlc (no v).
-    - Stooq returns 'N/D' instead of a number when data is unavailable;
-      parser guards against this explicitly.
-    - CSV columns (0-based): Symbol, Date, Time, Open, High, Low, Close
-      Close is index 6.
+    Gold spot price (USD/troy oz) — primary: gold-api.com.
     """
-    _STOOQ_URL   = "https://stooq.com/q/l/?s=xauusd&f=sd2t2ohlc&h&e=csv"
+
     _GOLDAPI_URL = "https://api.gold-api.com/price/XAU"
     _SANITY_LO   = 1000.0
     _SANITY_HI   = 8000.0
@@ -599,23 +600,6 @@ class GoldPriceSource(PriceSource):
         self.min_refresh_seconds = min_refresh_seconds
         self._last_price: Optional[float] = None
         self._last_fetch_ts: float = 0.0
-
-    def _fetch_stooq(self) -> float:
-        r = requests.get(self._STOOQ_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        r.raise_for_status()
-        lines = r.text.strip().split("\n")
-        if len(lines) < 2:
-            raise ValueError("Stooq: empty response")
-        row = lines[1].split(",")
-        if len(row) < 7:
-            raise ValueError(f"Stooq: unexpected row format: {lines[1]!r}")
-        raw = row[6].strip()
-        if raw in ("N/D", "N/A", "", "-"):
-            raise ValueError(f"Stooq: no data (\'{raw}\') — market may be closed")
-        price = float(raw)
-        if not (self._SANITY_LO <= price <= self._SANITY_HI):
-            raise ValueError(f"Stooq: price {price} outside sanity range")
-        return price
 
     def _fetch_goldapi(self) -> float:
         r = requests.get(self._GOLDAPI_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
@@ -635,21 +619,72 @@ class GoldPriceSource(PriceSource):
                 stale=self._last_price is None,
             )
         errors = []
-        for fetch_fn in (self._fetch_stooq, self._fetch_goldapi):
-            try:
-                price = fetch_fn()
-                self._last_price = price
-                self._last_fetch_ts = now
-                return PricePoint(source=self.name, price=price, ts=now)
-            except Exception as e:
-                errors.append(f"{fetch_fn.__name__}: {e}")
-        return PricePoint(
-            source=self.name,
-            price=self._last_price,
-            ts=self._last_fetch_ts or now,
-            stale=True,
-            error=" | ".join(errors),
-        )
+        try:
+            price = self._fetch_goldapi()
+            self._last_price = price
+            self._last_fetch_ts = now
+            return PricePoint(source=self.name, price=price, ts=now)
+        except Exception as e:
+            return PricePoint(
+                source=self.name,
+                price=self._last_price,
+                ts=self._last_fetch_ts or now,
+                stale=True,
+                error=str(e),
+            )
+
+class SilverPriceSource(PriceSource):
+    """
+    Silver spot price (USD/troy oz) — primary: gold-api.com
+
+    Mirrors GoldPriceSource exactly except for sanity range and API URL.
+
+    Sanity range: silver has traded $10-$50 since 1980 with brief spikes;
+    $8-$100 gives room without accepting garbage.
+    """
+    _SILVER_API = "https://api.gold-api.com/price/XAG"
+    _SANITY_LO = 8.0
+    _SANITY_HI = 100.0
+
+    def __init__(self, min_refresh_seconds: int = 30) -> None:
+        self.name = "silverprice"
+        self.min_refresh_seconds = min_refresh_seconds
+        self._last_price: Optional[float] = None
+        self._last_fetch_ts: float = 0.0
+
+    def _fetch_silverapi(self) -> float:
+        r = requests.get(self._SILVER_API, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        if "price" not in data:
+            raise ValueError("Silver API: unexpected response format")
+        price = float(data["price"])
+        if not (self._SANITY_LO <= price <= self._SANITY_HI):
+            raise ValueError(f"Silver API: price {price} outside sanity range")
+        return price
+
+    async def get_price(self) -> PricePoint:
+        now = now_ts()
+        if now - self._last_fetch_ts < self.min_refresh_seconds:
+            return PricePoint(
+                source=self.name,
+                price=self._last_price,
+                ts=self._last_fetch_ts,
+                stale=self._last_price is None,
+            )
+        try:
+            price = self._fetch_silverapi()
+            self._last_price = price
+            self._last_fetch_ts = now
+            return PricePoint(source=self.name, price=price, ts=now)
+        except Exception as e:
+            return PricePoint(
+                source=self.name,
+                price=self._last_price,
+                ts=self._last_fetch_ts or now,
+                stale=True,
+                error=str(e),
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -792,6 +827,7 @@ class EventEngine:
         actions_queue: Deque[Action],
         logs_queue: Deque[str],
         armed: bool = False,
+        coordinator: Optional["Engine"] = None,
     ) -> None:
         self.event_ticker = event_ticker
         self.settlement_time = settlement_time
@@ -799,6 +835,10 @@ class EventEngine:
         self.kalshi = kalshi
         self._actions = actions_queue
         self._logs = logs_queue
+        # Back-reference to the Engine, used to route auto-sells through the
+        # Telegram confirmation gate. Stop losses bypass this and execute
+        # directly via _execute_sell; everything else must ask first.
+        self.coordinator = coordinator
 
         self.positions: List[Position] = []
         self.armed = armed
@@ -812,6 +852,7 @@ class EventEngine:
         # Persistent per-engine spot sources preserve throttle cache across ticks.
         self._oilprice_source: Optional[OilPriceSource] = None
         self._goldprice_source: Optional[GoldPriceSource] = None
+        self._silverprice_source: Optional[SilverPriceSource] = None
 
     def log(self, msg: str) -> None:
         stamp = datetime.now().strftime("%H:%M:%S")
@@ -866,6 +907,14 @@ class EventEngine:
                 if self._goldprice_source is None:
                     self._goldprice_source = GoldPriceSource(min_refresh_seconds=refresh)
                 source_objects.append(self._goldprice_source)
+            elif instrument.get("use_silverprice"):
+                # Silver instrument — XAGUSD, mirroring the gold path.
+                # Reuses the `oilprice.enabled` config toggle intentionally: it's
+                # the "third-party spot source" gate, whatever the underlying feed.
+                refresh = src_cfg["oilprice"].get("min_refresh_seconds", 30)
+                if self._silverprice_source is None:
+                    self._silverprice_source = SilverPriceSource(min_refresh_seconds=refresh)
+                source_objects.append(self._silverprice_source)
             else:
                 oilprice_sym = instrument.get("oilprice_symbol") or src_cfg["oilprice"].get("symbol")
                 if oilprice_sym:
@@ -1026,8 +1075,11 @@ class EventEngine:
                 continue
             if self.position_endangered(p, consensus):
                 self._add_action("danger", "SELL_LEG", reason, p.ticker, p.side, p.count)
-                if self.params.mode == "live" and self.armed:
-                    asyncio.create_task(self._execute_sell(p, p.count))
+                if self.params.mode == "live" and self.armed and self.coordinator is not None:
+                    # Confirmation gate — no direct execution for non-stop sells.
+                    asyncio.create_task(
+                        self.coordinator.request_auto_sell(self, p, p.count, reason)
+                    )
 
     def _structure_drift(self) -> None:
         yes = sum(p.count for p in self.positions if p.side == "yes")
@@ -1086,14 +1138,18 @@ class EventEngine:
                 continue  # Position not valuable enough to trigger
             cushion = abs(consensus - p.strike)
             if cushion < cushion_threshold:
-                self._add_action(
-                    "warn", "SELL_LEG",
+                reason = (
                     f"Late-day thin cushion: {cushion:.2f} cushion at {mid:.2f} "
-                    f"with {minutes_left:.0f} min left.",
+                    f"with {minutes_left:.0f} min left."
+                )
+                self._add_action(
+                    "warn", "SELL_LEG", reason,
                     p.ticker, p.side, p.count,
                 )
-                if self.params.mode == "live" and self.armed:
-                    asyncio.create_task(self._execute_sell(p, p.count))
+                if self.params.mode == "live" and self.armed and self.coordinator is not None:
+                    asyncio.create_task(
+                        self.coordinator.request_auto_sell(self, p, p.count, reason)
+                    )
 
     # -----------------------------------------------------------------------
     # Execution
@@ -1269,6 +1325,7 @@ class Engine:
             actions_queue=self.actions,
             logs_queue=self.logs,
             armed=self.params.armed,
+            coordinator=self,
         )
         positions = [Position(**p) for p in config.get("positions", [])]
         for p in positions:
@@ -1375,6 +1432,7 @@ class Engine:
                     actions_queue=self.actions,
                     logs_queue=self.logs,
                     armed=False,
+                    coordinator=self,
                 )
                 self.log(f"New event discovered: {event_ticker}")
 
@@ -1423,6 +1481,13 @@ class Engine:
         Evaluate per-position bot configs every tick.
         Reads directly from position_bots dict — not p.bot_config which
         gets wiped on every sync_positions() call.
+
+        Sell routing:
+          - STOP LOSS auto-executes via _execute_sell (safety net; user
+            explicitly wants this to bypass confirmation).
+          - Everything else (limit sell, harvest, time exit) routes through
+            request_auto_sell → Telegram confirmation. No answer = no sale,
+            which is what the user asked for.
         """
         now_dt = datetime.now()
         for eng in list(self.event_engines.values()):
@@ -1437,11 +1502,11 @@ class Engine:
                 if not mid:
                     continue
 
-                # ── Stop loss ──────────────────────────────────────────────
+                # ── Stop loss (auto-executes, no confirmation) ─────────────
                 stop = cfg.get("stop_loss")
                 if stop is not None and mid <= stop:
-                    # Strike cushion gate: only fire if spot is close to strike
-                    # Prevents firing on illiquid overnight prices when position is safe
+                    # Strike cushion gate: only fire if spot is close to strike.
+                    # Prevents firing on illiquid overnight prices when position is safe.
                     strike_cushion = cfg.get("strike_cushion")
                     spot = eng.consensus_price()
                     cushion_ok = True
@@ -1472,48 +1537,46 @@ class Engine:
                         self.position_bots.pop(p.ticker, None)
                         continue  # Don't check other conditions once stop fires
 
-                # ── Limit sell (take profit) ───────────────────────────────
+                # ── Limit sell (take profit — requires confirmation) ───────
                 limit = cfg.get("limit_sell")
                 if limit is not None and mid >= limit:
+                    reason = f"Bot limit sell: mid {mid:.2f} >= target {limit:.2f}"
                     eng._add_action(
-                        "info", "SELL_LEG",
-                        f"Bot limit sell: mid {mid:.2f} >= target {limit:.2f}",
+                        "info", "SELL_LEG", reason,
                         p.ticker, p.side, p.count,
                     )
                     if self.params.mode == "live" and eng.armed:
-                        await eng._execute_sell(p, p.count)
+                        await self.request_auto_sell(eng, p, p.count, reason)
                     continue
 
-                # ── Momentum harvest ───────────────────────────────────────
+                # ── Momentum harvest (hard floor — requires confirmation) ──
+                #
+                # User's rule (July 6 harvest bug): "I don't want profit
+                # harvest at 88c just because it went to 90c and down to 87c."
+                # Fix: harvest never fires unless mid is CURRENTLY at or above
+                # harvest_floor. Optional min_profit adds a second floor
+                # relative to avg_price. Both are hard gates checked live —
+                # no peak-triggered, drop-tolerant behavior.
                 if cfg.get("harvest"):
-                    # Optional arm price: trailing logic is inert until mid has
-                    # reached this contract price at least once. Without this,
-                    # the trail compares against peak_mid from the moment the
-                    # position was opened/bot was attached, which can fire on
-                    # a peak that was never actually profitable.
-                    arm_at = cfg.get("harvest_arm_at")
-                    armed_by_price = arm_at is None or p.peak_mid >= arm_at
+                    floor = float(cfg.get("harvest_floor", 0.95))
+                    min_profit = float(cfg.get("harvest_min_profit", 0.0))
+                    # Second floor: avg_price + min_profit ensures we never
+                    # harvest at a loss (min_profit=0 defaults to breakeven).
+                    profit_floor = p.avg_price + min_profit if min_profit > 0 else 0.0
+                    effective_floor = max(floor, profit_floor)
+                    if mid >= effective_floor:
+                        reason = (
+                            f"Bot harvest: mid {mid:.2f} >= floor {effective_floor:.2f}"
+                        )
+                        eng._add_action(
+                            "warn", "SELL_LEG", reason,
+                            p.ticker, p.side, p.count,
+                        )
+                        if self.params.mode == "live" and eng.armed:
+                            await self.request_auto_sell(eng, p, p.count, reason)
+                    continue
 
-                    if armed_by_price:
-                        sensitivity = int(cfg.get("harvest_sensitivity", 3))
-                        # Trail size scales with sensitivity: 1=tight(2%), 10=loose(11%)
-                        trail_pct = 0.01 + (sensitivity - 1) * 0.01
-                        if p.peak_mid > 0 and mid <= p.peak_mid * (1 - trail_pct):
-                            reason = (
-                                f"Bot harvest: mid {mid:.2f} fell {trail_pct*100:.0f}% "
-                                f"from peak {p.peak_mid:.2f} (sensitivity {sensitivity})"
-                            )
-                            if arm_at is not None:
-                                reason += f" [armed at {arm_at:.2f}]"
-                            eng._add_action(
-                                "warn", "SELL_LEG", reason,
-                                p.ticker, p.side, p.count,
-                            )
-                            if self.params.mode == "live" and eng.armed:
-                                await eng._execute_sell(p, p.count)
-                            continue
-
-                # ── Time exit ──────────────────────────────────────────────
+                # ── Time exit (requires confirmation) ──────────────────────
                 time_exit = cfg.get("time_exit")
                 if time_exit:
                     try:
@@ -1522,15 +1585,46 @@ class Engine:
                             hour=exit_h, minute=exit_m, second=0, microsecond=0
                         )
                         if now_dt >= exit_dt:
+                            reason = f"Bot time exit: {time_exit} reached"
                             eng._add_action(
-                                "warn", "SELL_LEG",
-                                f"Bot time exit: {time_exit} reached",
+                                "warn", "SELL_LEG", reason,
                                 p.ticker, p.side, p.count,
                             )
                             if self.params.mode == "live" and eng.armed:
-                                await eng._execute_sell(p, p.count)
+                                await self.request_auto_sell(eng, p, p.count, reason)
                     except Exception as e:
                         self.log(f"Bot time_exit parse error {p.ticker}: {e}")
+
+    async def request_auto_sell(
+        self,
+        eng: "EventEngine",
+        position: Position,
+        qty: int,
+        reason: str,
+    ) -> None:
+        """
+        Central gate for every non-stop automated sell.
+
+        - If a Telegram bot is available and healthy, ask the user; the sell
+          only executes when the user taps APPROVE.
+        - If Telegram is unavailable, DO NOT SELL. Log the intent. Per the
+          user's rule: "I'd rather no sale than a bad sale (except stop loss)."
+        """
+        tg = getattr(self, "telegram", None)
+        if tg is not None:
+            try:
+                await tg.request_sell_confirmation(eng, position, qty, reason)
+                return
+            except Exception as e:
+                self.log(
+                    f"Telegram confirm request failed for {position.ticker}: {e} — "
+                    f"NOT selling (fail-safe: no sale > bad sale)."
+                )
+                return
+        self.log(
+            f"AUTO-SELL BLOCKED (no Telegram confirm path available): "
+            f"{position.ticker} — {reason}"
+        )
 
     async def loop(self) -> None:
         self._running = True
@@ -1626,7 +1720,24 @@ engine = Engine(load_config())
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     asyncio.create_task(engine.loop())
+
+    # Start Telegram bot if configured
+    tg_cfg = engine.config.get("telegram")
+    if tg_cfg and tg_cfg.get("token") and tg_cfg["token"] != "YOUR_TOKEN_HERE":
+        try:
+            from kalshibaby_telegram import KalshiBabyBot
+            tg_bot = KalshiBabyBot(engine, tg_cfg)
+            engine.telegram = tg_bot   # expose so engine can call send_stop_loss_alert
+            await tg_bot.start()
+        except Exception as e:
+            engine.log(f"Telegram bot failed to start: {e}")
+    else:
+        engine.telegram = None
+
     yield
+
+    if getattr(engine, "telegram", None):
+        await engine.telegram.stop()
 
 
 app = FastAPI(title="KalshiBaby v3", lifespan=lifespan)
@@ -1850,6 +1961,22 @@ async def api_debug_portfolio():
             "probe_status": probe_status,
         }
 
+@app.get("/api/wapner_candidates")
+async def api_wapner_candidates(event_ticker: Optional[str] = None):
+    if event_ticker and event_ticker not in engine.event_engines:
+        raise HTTPException(status_code=404, detail="Event not found")
+    engines = (
+        {event_ticker: engine.event_engines[event_ticker]}
+        if event_ticker else engine.event_engines
+    )
+    results = {}
+    for et, eng in engines.items():
+        try:
+            results[et] = evaluate_event_wapner(engine, eng)
+        except Exception as e:
+            results[et] = [{"event_ticker": et, "grade": "REJECT",
+                            "reasons": [f"evaluation error: {e}"]}]
+    return {"ts": time.time(), "candidates": results}
 
 # ---------------------------------------------------------------------------
 # Buy candidates scan — finds open contracts in the entry price zone

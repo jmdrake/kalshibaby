@@ -1,0 +1,362 @@
+
+Active markets in KXNATGASD series for 26JUL0817:
+- KXNATGASD-26JUL0817-T3.345: Will the natural gas close price be above 3.345 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.0400
+  YES ask:  $0.1900
+  NO bid:   $0.8100
+  NO ask:   $0.9600
+  Last:     $0.2000
+  Volume:   32.00
+
+- KXNATGASD-26JUL0817-T3.340: Will the natural gas close price be above 3.340 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.0500
+  YES ask:  $0.2000
+  NO bid:   $0.8000
+  NO ask:   $0.9500
+  Last:     $0.0900
+  Volume:   70.00
+
+- KXNATGASD-26JUL0817-T3.335: Will the natural gas close price be above 3.335 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.1000
+  YES ask:  $0.1800
+  NO bid:   $0.8200
+  NO ask:   $0.9000
+  Last:     $0.1000
+  Volume:   58.00
+
+- KXNATGASD-26JUL0817-T3.330: Will the natural gas close price be above 3.330 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.0800
+  YES ask:  $0.1700
+  NO bid:   $0.8300
+  NO ask:   $0.9200
+  Last:     $0.1400
+  Volume:   180.58
+
+- KXNATGASD-26JUL0817-T3.325: Will the natural gas close price be above 3.325 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.1200
+  YES ask:  $0.1500
+  NO bid:   $0.8500
+  NO ask:   $0.8800
+  Last:     $0.2000
+  Volume:   827.76
+
+- KXNATGASD-26JUL0817-T3.320: Will the natural gas close price be above 3.320 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.1300
+  YES ask:  $0.1700
+  NO bid:   $0.8300
+  NO ask:   $0.8700
+  Last:     $0.1700
+  Volume:   421.00
+
+- KXNATGASD-26JUL0817-T3.315: Will the natural gas close price be above 3.315 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.1600
+  YES ask:  $0.1900
+  NO bid:   $0.8100
+  NO ask:   $0.8400
+  Last:     $0.2100
+  Volume:   243.00
+
+- KXNATGASD-26JUL0817-T3.310: Will the natural gas close price be above 3.310 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.1800
+  YES ask:  $0.2100
+  NO bid:   $0.7900
+  NO ask:   $0.8200
+  Last:     $0.2500
+  Volume:   312.64
+
+- KXNATGASD-26JUL0817-T3.305: Will the natural gas close price be above 3.305 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.2100
+  YES ask:  $0.2400
+  NO bid:   $0.7600
+  NO ask:   $0.7900
+  Last:     $0.2700
+  Volume:   299.57
+
+- KXNATGASD-26JUL0817-T3.300: Will the natural gas close price be above 3.300 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.2200
+  YES ask:  $0.2600
+  NO bid:   $0.7400
+  NO ask:   $0.7800
+  Last:     $0.3100
+  Volume:   444.52
+
+- KXNATGASD-26JUL0817-T3.295: Will the natural gas close price be above 3.295 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.2700
+  YES ask:  $0.2900
+  NO bid:   $0.7100
+  NO ask:   $0.7300
+  Last:     $0.3400
+  Volume:   485.00
+
+- KXNATGASD-26JUL0817-T3.290: Will the natural gas close price be above 3.290 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.2800
+  YES ask:  $0.3200
+  NO bid:   $0.6800
+  NO ask:   $0.7200
+  Last:     $0.3800
+  Volume:   282.47
+
+- KXNATGASD-26JUL0817-T3.285: Will the natural gas close price be above 3.285 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.3200
+  YES ask:  $0.3600
+  NO bid:   $0.6400
+  NO ask:   $0.6800
+  Last:     $0.4000
+  Volume:   250.27
+
+- KXNATGASD-26JUL0817-T3.280: Will the natural gas close price be above 3.280 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.3600
+  YES ask:  $0.3900
+  NO bid:   $0.6100
+  NO ask:   $0.6400
+  Last:     $0.4100
+  Volume:   375.59
+
+- KXNATGASD-26JUL0817-T3.275: Will the natural gas close price be above 3.275 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.4100
+  YES ask:  $0.4300
+  NO bid:   $0.5700
+  NO ask:   $0.5900
+  Last:     $0.4700
+  Volume:   518.80
+
+- KXNATGASD-26JUL0817-T3.270: Will the natural gas close price be above 3.270 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.4300
+  YES ask:  $0.4700
+  NO bid:   $0.5300
+  NO ask:   $0.5700
+  Last:     $0.5700
+  Volume:   315.18
+
+- KXNATGASD-26JUL0817-T3.265: Will the natural gas close price be above 3.265 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.4700
+  YES ask:  $0.5100
+  NO bid:   $0.4900
+  NO ask:   $0.5300
+  Last:     $0.5800
+  Volume:   99.09
+
+- KXNATGASD-26JUL0817-T3.260: Will the natural gas close price be above 3.260 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.5200
+  YES ask:  $0.5500
+  NO bid:   $0.4500
+  NO ask:   $0.4800
+  Last:     $0.6000
+  Volume:   566.84
+
+- KXNATGASD-26JUL0817-T3.255: Will the natural gas close price be above 3.255 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.5500
+  YES ask:  $0.5900
+  NO bid:   $0.4100
+  NO ask:   $0.4500
+  Last:     $0.6400
+  Volume:   26.13
+
+- KXNATGASD-26JUL0817-T3.250: Will the natural gas close price be above 3.250 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.6300
+  YES ask:  $0.6400
+  NO bid:   $0.3600
+  NO ask:   $0.3700
+  Last:     $0.8400
+  Volume:   1155.00
+
+- KXNATGASD-26JUL0817-T3.245: Will the natural gas close price be above 3.245 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.6300
+  YES ask:  $0.6600
+  NO bid:   $0.3400
+  NO ask:   $0.3700
+  Last:     $0.7900
+  Volume:   793.00
+
+- KXNATGASD-26JUL0817-T3.240: Will the natural gas close price be above 3.240 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.6600
+  YES ask:  $0.6900
+  NO bid:   $0.3100
+  NO ask:   $0.3400
+  Last:     $0.8700
+  Volume:   1573.94
+
+- KXNATGASD-26JUL0817-T3.235: Will the natural gas close price be above 3.235 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.7000
+  YES ask:  $0.7400
+  NO bid:   $0.2600
+  NO ask:   $0.3000
+  Last:     $0.7800
+  Volume:   669.00
+
+- KXNATGASD-26JUL0817-T3.230: Will the natural gas close price be above 3.230 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.7300
+  YES ask:  $0.7700
+  NO bid:   $0.2300
+  NO ask:   $0.2700
+  Last:     $0.8400
+  Volume:   1179.57
+
+- KXNATGASD-26JUL0817-T3.225: Will the natural gas close price be above 3.225 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.7600
+  YES ask:  $0.8000
+  NO bid:   $0.2000
+  NO ask:   $0.2400
+  Last:     $0.8400
+  Volume:   733.35
+
+- KXNATGASD-26JUL0817-T3.220: Will the natural gas close price be above 3.220 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.8500
+  YES ask:  $0.8600
+  NO bid:   $0.1400
+  NO ask:   $0.1500
+  Last:     $0.8800
+  Volume:   370.65
+
+- KXNATGASD-26JUL0817-T3.215: Will the natural gas close price be above 3.215 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.8100
+  YES ask:  $0.8500
+  NO bid:   $0.1500
+  NO ask:   $0.1900
+  Last:     $0.9000
+  Volume:   403.00
+
+- KXNATGASD-26JUL0817-T3.210: Will the natural gas close price be above 3.210 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.8400
+  YES ask:  $0.8800
+  NO bid:   $0.1200
+  NO ask:   $0.1600
+  Last:     $0.9600
+  Volume:   176.76
+
+- KXNATGASD-26JUL0817-T3.205: Will the natural gas close price be above 3.205 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.8600
+  YES ask:  $0.9000
+  NO bid:   $0.1000
+  NO ask:   $0.1400
+  Last:     $0.9300
+  Volume:   75.00
+
+- KXNATGASD-26JUL0817-T3.200: Will the natural gas close price be above 3.200 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.7700
+  YES ask:  $0.9600
+  NO bid:   $0.0400
+  NO ask:   $0.2300
+  Last:     $0.9500
+  Volume:   126.69
+
+- KXNATGASD-26JUL0817-T3.195: Will the natural gas close price be above 3.195 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.7800
+  YES ask:  $0.9800
+  NO bid:   $0.0200
+  NO ask:   $0.2200
+  Last:     $0.9600
+  Volume:   35.00
+
+- KXNATGASD-26JUL0817-T3.190: Will the natural gas close price be above 3.190 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.7700
+  YES ask:  $0.9700
+  NO bid:   $0.0300
+  NO ask:   $0.2300
+  Last:     $0.9300
+  Volume:   25.00
+
+- KXNATGASD-26JUL0817-T3.185: Will the natural gas close price be above 3.185 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.7800
+  YES ask:  $0.9700
+  NO bid:   $0.0300
+  NO ask:   $0.2200
+  Last:     $0.9400
+  Volume:   42.00
+
+- KXNATGASD-26JUL0817-T3.180: Will the natural gas close price be above 3.180 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.8000
+  YES ask:  $0.9800
+  NO bid:   $0.0200
+  NO ask:   $0.2000
+  Last:     $0.9400
+  Volume:   249.26
+
+- KXNATGASD-26JUL0817-T3.175: Will the natural gas close price be above 3.175 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.7800
+  YES ask:  $0.9800
+  NO bid:   $0.0200
+  NO ask:   $0.2200
+  Last:     $0.9300
+  Volume:   893.00
+
+- KXNATGASD-26JUL0817-T3.170: Will the natural gas close price be above 3.170 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.8300
+  YES ask:  $0.9800
+  NO bid:   $0.0200
+  NO ask:   $0.1700
+  Last:     $0.7900
+  Volume:   10.00
+
+- KXNATGASD-26JUL0817-T3.165: Will the natural gas close price be above 3.165 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.8500
+  YES ask:  $0.9800
+  NO bid:   $0.0200
+  NO ask:   $0.1500
+  Last:     $0.9200
+  Volume:   9.00
+
+- KXNATGASD-26JUL0817-T3.160: Will the natural gas close price be above 3.160 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.8600
+  YES ask:  $0.9800
+  NO bid:   $0.0200
+  NO ask:   $0.1400
+  Last:     $0.9200
+  Volume:   9.00
+
+- KXNATGASD-26JUL0817-T3.155: Will the natural gas close price be above 3.155 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.8600
+  YES ask:  $0.9800
+  NO bid:   $0.0200
+  NO ask:   $0.1400
+  Last:     $0.9300
+  Volume:   9.00
+
+- KXNATGASD-26JUL0817-T3.150: Will the natural gas close price be above 3.150 USD/MMBtu on July 08, 2026 at 5:00 PM EDT?
+  Event: KXNATGASD-26JUL0817
+  YES bid:  $0.8600
+  YES ask:  $0.9700
+  NO bid:   $0.0300
+  NO ask:   $0.1400
+  Last:     $0.9700
+  Volume:   27.00
+

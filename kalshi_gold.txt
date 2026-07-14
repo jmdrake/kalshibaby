@@ -1,0 +1,362 @@
+
+Active markets in KXGOLDD series for 26JUL0817:
+- KXGOLDD-26JUL0817-T4318: Will the gold close price be above 4318 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0400
+  Volume:   59.24
+
+- KXGOLDD-26JUL0817-T4308: Will the gold close price be above 4308 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0000
+  Volume:   0.00
+
+- KXGOLDD-26JUL0817-T4298: Will the gold close price be above 4298 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0000
+  Volume:   0.00
+
+- KXGOLDD-26JUL0817-T4288: Will the gold close price be above 4288 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0000
+  Volume:   0.00
+
+- KXGOLDD-26JUL0817-T4278: Will the gold close price be above 4278 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0300
+  Volume:   42.15
+
+- KXGOLDD-26JUL0817-T4268: Will the gold close price be above 4268 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0300
+  Volume:   108.00
+
+- KXGOLDD-26JUL0817-T4258: Will the gold close price be above 4258 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0200
+  Volume:   43.00
+
+- KXGOLDD-26JUL0817-T4248: Will the gold close price be above 4248 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0200
+  Volume:   229.56
+
+- KXGOLDD-26JUL0817-T4238: Will the gold close price be above 4238 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0100
+  Volume:   208.84
+
+- KXGOLDD-26JUL0817-T4228: Will the gold close price be above 4228 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0100
+  Volume:   928.56
+
+- KXGOLDD-26JUL0817-T4218: Will the gold close price be above 4218 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0100
+  Volume:   319.57
+
+- KXGOLDD-26JUL0817-T4208: Will the gold close price be above 4208 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0100
+  Volume:   1062.28
+
+- KXGOLDD-26JUL0817-T4198: Will the gold close price be above 4198 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0000
+  YES ask:  $0.0100
+  NO bid:   $0.9900
+  NO ask:   $1.0000
+  Last:     $0.0100
+  Volume:   938.22
+
+- KXGOLDD-26JUL0817-T4188: Will the gold close price be above 4188 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0200
+  YES ask:  $0.0300
+  NO bid:   $0.9700
+  NO ask:   $0.9800
+  Last:     $0.0200
+  Volume:   441.11
+
+- KXGOLDD-26JUL0817-T4178: Will the gold close price be above 4178 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0100
+  YES ask:  $0.0200
+  NO bid:   $0.9800
+  NO ask:   $0.9900
+  Last:     $0.0200
+  Volume:   1082.32
+
+- KXGOLDD-26JUL0817-T4168: Will the gold close price be above 4168 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0100
+  YES ask:  $0.0200
+  NO bid:   $0.9800
+  NO ask:   $0.9900
+  Last:     $0.0300
+  Volume:   2264.00
+
+- KXGOLDD-26JUL0817-T4158: Will the gold close price be above 4158 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0400
+  YES ask:  $0.0500
+  NO bid:   $0.9500
+  NO ask:   $0.9600
+  Last:     $0.0500
+  Volume:   3826.18
+
+- KXGOLDD-26JUL0817-T4148: Will the gold close price be above 4148 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0400
+  YES ask:  $0.0500
+  NO bid:   $0.9500
+  NO ask:   $0.9600
+  Last:     $0.0400
+  Volume:   3392.78
+
+- KXGOLDD-26JUL0817-T4138: Will the gold close price be above 4138 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0300
+  YES ask:  $0.0400
+  NO bid:   $0.9600
+  NO ask:   $0.9700
+  Last:     $0.0600
+  Volume:   2197.09
+
+- KXGOLDD-26JUL0817-T4128: Will the gold close price be above 4128 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0500
+  YES ask:  $0.0600
+  NO bid:   $0.9400
+  NO ask:   $0.9500
+  Last:     $0.0600
+  Volume:   5434.56
+
+- KXGOLDD-26JUL0817-T4118: Will the gold close price be above 4118 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0600
+  YES ask:  $0.0700
+  NO bid:   $0.9300
+  NO ask:   $0.9400
+  Last:     $0.0800
+  Volume:   4268.95
+
+- KXGOLDD-26JUL0817-T4108: Will the gold close price be above 4108 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.0900
+  YES ask:  $0.1000
+  NO bid:   $0.9000
+  NO ask:   $0.9100
+  Last:     $0.1500
+  Volume:   4417.12
+
+- KXGOLDD-26JUL0817-T4098: Will the gold close price be above 4098 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.1600
+  YES ask:  $0.1800
+  NO bid:   $0.8200
+  NO ask:   $0.8400
+  Last:     $0.2500
+  Volume:   3252.57
+
+- KXGOLDD-26JUL0817-T4088: Will the gold close price be above 4088 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.2600
+  YES ask:  $0.2700
+  NO bid:   $0.7300
+  NO ask:   $0.7400
+  Last:     $0.3700
+  Volume:   2767.18
+
+- KXGOLDD-26JUL0817-T4078: Will the gold close price be above 4078 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.3700
+  YES ask:  $0.3800
+  NO bid:   $0.6200
+  NO ask:   $0.6300
+  Last:     $0.4100
+  Volume:   5900.75
+
+- KXGOLDD-26JUL0817-T4068: Will the gold close price be above 4068 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.4900
+  YES ask:  $0.5100
+  NO bid:   $0.4900
+  NO ask:   $0.5100
+  Last:     $0.5300
+  Volume:   3204.67
+
+- KXGOLDD-26JUL0817-T4058: Will the gold close price be above 4058 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.6100
+  YES ask:  $0.6300
+  NO bid:   $0.3700
+  NO ask:   $0.3900
+  Last:     $0.7000
+  Volume:   2057.14
+
+- KXGOLDD-26JUL0817-T4048: Will the gold close price be above 4048 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.6900
+  YES ask:  $0.7300
+  NO bid:   $0.2700
+  NO ask:   $0.3100
+  Last:     $0.7800
+  Volume:   1522.24
+
+- KXGOLDD-26JUL0817-T4038: Will the gold close price be above 4038 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.7700
+  YES ask:  $0.8100
+  NO bid:   $0.1900
+  NO ask:   $0.2300
+  Last:     $0.8100
+  Volume:   2487.81
+
+- KXGOLDD-26JUL0817-T4028: Will the gold close price be above 4028 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.8300
+  YES ask:  $0.8600
+  NO bid:   $0.1400
+  NO ask:   $0.1700
+  Last:     $0.8900
+  Volume:   1341.90
+
+- KXGOLDD-26JUL0817-T4018: Will the gold close price be above 4018 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.8700
+  YES ask:  $0.9100
+  NO bid:   $0.0900
+  NO ask:   $0.1300
+  Last:     $0.9100
+  Volume:   1023.55
+
+- KXGOLDD-26JUL0817-T4008: Will the gold close price be above 4008 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.9200
+  YES ask:  $0.9300
+  NO bid:   $0.0700
+  NO ask:   $0.0800
+  Last:     $0.9000
+  Volume:   1105.05
+
+- KXGOLDD-26JUL0817-T3998: Will the gold close price be above 3998 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.9400
+  YES ask:  $0.9500
+  NO bid:   $0.0500
+  NO ask:   $0.0600
+  Last:     $0.9500
+  Volume:   803.10
+
+- KXGOLDD-26JUL0817-T3988: Will the gold close price be above 3988 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.9600
+  YES ask:  $0.9700
+  NO bid:   $0.0300
+  NO ask:   $0.0400
+  Last:     $0.9500
+  Volume:   633.39
+
+- KXGOLDD-26JUL0817-T3978: Will the gold close price be above 3978 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.9600
+  YES ask:  $0.9800
+  NO bid:   $0.0200
+  NO ask:   $0.0400
+  Last:     $0.9500
+  Volume:   1546.00
+
+- KXGOLDD-26JUL0817-T3968: Will the gold close price be above 3968 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.9700
+  YES ask:  $0.9800
+  NO bid:   $0.0200
+  NO ask:   $0.0300
+  Last:     $0.9500
+  Volume:   445.45
+
+- KXGOLDD-26JUL0817-T3958: Will the gold close price be above 3958 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.9700
+  YES ask:  $0.9900
+  NO bid:   $0.0100
+  NO ask:   $0.0300
+  Last:     $0.9700
+  Volume:   1419.93
+
+- KXGOLDD-26JUL0817-T3948: Will the gold close price be above 3948 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.9700
+  YES ask:  $0.9900
+  NO bid:   $0.0100
+  NO ask:   $0.0300
+  Last:     $0.9900
+  Volume:   981.21
+
+- KXGOLDD-26JUL0817-T3938: Will the gold close price be above 3938 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.9800
+  YES ask:  $0.9900
+  NO bid:   $0.0100
+  NO ask:   $0.0200
+  Last:     $0.9900
+  Volume:   344.66
+
+- KXGOLDD-26JUL0817-T3928: Will the gold close price be above 3928 USD/t.oz on July 08, 2026 at 5:00 PM EDT?
+  Event: KXGOLDD-26JUL0817
+  YES bid:  $0.9700
+  YES ask:  $0.9900
+  NO bid:   $0.0100
+  NO ask:   $0.0300
+  Last:     $0.9700
+  Volume:   2114.01
+

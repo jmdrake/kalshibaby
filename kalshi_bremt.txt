@@ -1,0 +1,272 @@
+
+Active markets in KXBRENTD series for 26JUL0817:
+- KXBRENTD-26JUL0817-T82.50: Will the brent crude oil close price be above 82.50 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.0200
+  YES ask:  $0.0400
+  NO bid:   $0.9600
+  NO ask:   $0.9800
+  Last:     $0.0200
+  Volume:   114.06
+
+- KXBRENTD-26JUL0817-T82.00: Will the brent crude oil close price be above 82.00 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.0300
+  YES ask:  $0.0500
+  NO bid:   $0.9500
+  NO ask:   $0.9700
+  Last:     $0.0500
+  Volume:   1690.09
+
+- KXBRENTD-26JUL0817-T81.50: Will the brent crude oil close price be above 81.50 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.0500
+  YES ask:  $0.0600
+  NO bid:   $0.9400
+  NO ask:   $0.9500
+  Last:     $0.0700
+  Volume:   5.00
+
+- KXBRENTD-26JUL0817-T81.00: Will the brent crude oil close price be above 81.00 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.0600
+  YES ask:  $0.0800
+  NO bid:   $0.9200
+  NO ask:   $0.9400
+  Last:     $0.0800
+  Volume:   390.22
+
+- KXBRENTD-26JUL0817-T80.50: Will the brent crude oil close price be above 80.50 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.1000
+  YES ask:  $0.1300
+  NO bid:   $0.8700
+  NO ask:   $0.9000
+  Last:     $0.0900
+  Volume:   131.21
+
+- KXBRENTD-26JUL0817-T80.00: Will the brent crude oil close price be above 80.00 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.1500
+  YES ask:  $0.1700
+  NO bid:   $0.8300
+  NO ask:   $0.8500
+  Last:     $0.1400
+  Volume:   718.21
+
+- KXBRENTD-26JUL0817-T79.50: Will the brent crude oil close price be above 79.50 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.2100
+  YES ask:  $0.2500
+  NO bid:   $0.7500
+  NO ask:   $0.7900
+  Last:     $0.1900
+  Volume:   2280.87
+
+- KXBRENTD-26JUL0817-T79.00: Will the brent crude oil close price be above 79.00 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.3000
+  YES ask:  $0.3400
+  NO bid:   $0.6600
+  NO ask:   $0.7000
+  Last:     $0.2800
+  Volume:   2622.34
+
+- KXBRENTD-26JUL0817-T78.50: Will the brent crude oil close price be above 78.50 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.4200
+  YES ask:  $0.4500
+  NO bid:   $0.5500
+  NO ask:   $0.5800
+  Last:     $0.4300
+  Volume:   2972.99
+
+- KXBRENTD-26JUL0817-T78.00: Will the brent crude oil close price be above 78.00 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.5400
+  YES ask:  $0.5700
+  NO bid:   $0.4300
+  NO ask:   $0.4600
+  Last:     $0.4600
+  Volume:   2913.49
+
+- KXBRENTD-26JUL0817-T77.50: Will the brent crude oil close price be above 77.50 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.6700
+  YES ask:  $0.7000
+  NO bid:   $0.3000
+  NO ask:   $0.3300
+  Last:     $0.6400
+  Volume:   6217.42
+
+- KXBRENTD-26JUL0817-T77: Will the brent crude oil close price be above 77 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.7900
+  YES ask:  $0.8000
+  NO bid:   $0.2000
+  NO ask:   $0.2100
+  Last:     $0.7900
+  Volume:   3788.55
+
+- KXBRENTD-26JUL0817-T76.50: Will the brent crude oil close price be above 76.50 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.8400
+  YES ask:  $0.8500
+  NO bid:   $0.1500
+  NO ask:   $0.1600
+  Last:     $0.8400
+  Volume:   4370.41
+
+- KXBRENTD-26JUL0817-T76: Will the brent crude oil close price be above 76 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.8900
+  YES ask:  $0.9000
+  NO bid:   $0.1000
+  NO ask:   $0.1100
+  Last:     $0.8900
+  Volume:   5336.93
+
+- KXBRENTD-26JUL0817-T75.50: Will the brent crude oil close price be above 75.50 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.9200
+  YES ask:  $0.9300
+  NO bid:   $0.0700
+  NO ask:   $0.0800
+  Last:     $0.9400
+  Volume:   3752.38
+
+- KXBRENTD-26JUL0817-T75: Will the brent crude oil close price be above 75 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.9600
+  YES ask:  $0.9700
+  NO bid:   $0.0300
+  NO ask:   $0.0400
+  Last:     $0.9700
+  Volume:   1564.13
+
+- KXBRENTD-26JUL0817-T74.50: Will the brent crude oil close price be above 74.50 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.9800
+  YES ask:  $0.9900
+  NO bid:   $0.0100
+  NO ask:   $0.0200
+  Last:     $0.9800
+  Volume:   3549.07
+
+- KXBRENTD-26JUL0817-T74: Will the brent crude oil close price be above 74 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.9800
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0200
+  Last:     $0.9900
+  Volume:   3604.44
+
+- KXBRENTD-26JUL0817-T73.50: Will the brent crude oil close price be above 73.50 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.9800
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0200
+  Last:     $0.9900
+  Volume:   5023.93
+
+- KXBRENTD-26JUL0817-T73: Will the brent crude oil close price be above 73 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.9900
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0100
+  Last:     $0.9900
+  Volume:   2225.35
+
+- KXBRENTD-26JUL0817-T72.50: Will the brent crude oil close price be above 72.50 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.9900
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0100
+  Last:     $0.9900
+  Volume:   1114.00
+
+- KXBRENTD-26JUL0817-T72: Will the brent crude oil close price be above 72 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.9800
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0200
+  Last:     $0.9800
+  Volume:   357.75
+
+- KXBRENTD-26JUL0817-T71.50: Will the brent crude oil close price be above 71.50 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.9900
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0100
+  Last:     $0.9800
+  Volume:   394.81
+
+- KXBRENTD-26JUL0817-T71: Will the brent crude oil close price be above 71 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.9800
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0200
+  Last:     $0.9800
+  Volume:   344.81
+
+- KXBRENTD-26JUL0817-T70.50: Will the brent crude oil close price be above 70.50 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.9800
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0200
+  Last:     $0.9900
+  Volume:   267.57
+
+- KXBRENTD-26JUL0817-T70: Will the brent crude oil close price be above 70 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.9900
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0100
+  Last:     $0.0000
+  Volume:   0.00
+
+- KXBRENTD-26JUL0817-T69.50: Will the brent crude oil close price be above 69.50 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.9900
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0100
+  Last:     $0.0000
+  Volume:   0.00
+
+- KXBRENTD-26JUL0817-T69: Will the brent crude oil close price be above 69 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.9900
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0100
+  Last:     $0.0000
+  Volume:   0.00
+
+- KXBRENTD-26JUL0817-T68.50: Will the brent crude oil close price be above 68.50 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.9900
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0100
+  Last:     $0.0000
+  Volume:   0.00
+
+- KXBRENTD-26JUL0817-T68: Will the brent crude oil close price be above 68 USD/Bbl on July 08, 2026 at 5:00 PM EDT?
+  Event: KXBRENTD-26JUL0817
+  YES bid:  $0.9900
+  YES ask:  $1.0000
+  NO bid:   $0.0000
+  NO ask:   $0.0100
+  Last:     $0.9700
+  Volume:   99.80
+
