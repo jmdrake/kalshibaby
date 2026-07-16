@@ -260,10 +260,12 @@ class KalshiBabyBot:
         app.add_handler(CommandHandler("wapner",  self._cmd_wapner))
         app.add_handler(CommandHandler("stop",    self._cmd_set_stop))
         app.add_handler(CommandHandler("clearstop", self._cmd_clear_stop))
+        app.add_handler(CommandHandler("stopevent", self._cmd_stop_event))
         app.add_handler(CommandHandler("sell",    self._cmd_sell))
         app.add_handler(CommandHandler("arm",     self._cmd_arm))
         app.add_handler(CommandHandler("disarm",  self._cmd_disarm))
         app.add_handler(CommandHandler("mode",    self._cmd_mode))
+        app.add_handler(CommandHandler("hedge",   self._cmd_hedge))
         app.add_handler(CallbackQueryHandler(self._on_callback))
 
     # -----------------------------------------------------------------------
@@ -389,13 +391,15 @@ class KalshiBabyBot:
             f"/price — consensus prices\n"
             f"/wapner — five-gate PASS candidates\n"
             f"/wapner all — include rejects with failed gates\n"
-            f"/stop &lt;ticker&gt; &lt;price&gt; — set stop loss\n"
-            f"  e.g. /stop KXGOLDD-26JUL0217-T4039 0.75\n"
-            f"/clearstop &lt;ticker&gt; — remove stop loss\n"
-            f"/sell &lt;ticker&gt; — sell position (confirms first)\n"
-            f"/arm &lt;event_ticker&gt; — arm event\n"
-            f"/disarm &lt;event_ticker&gt; — disarm event\n"
+            f"/stop &lt;price&gt; — set stop loss (pick from list)\n"
+            f"/stop &lt;ticker&gt; &lt;price&gt; — set stop loss direct\n"
+            f"/stopevent &lt;price&gt; — stop on ALL legs of an event\n"
+            f"/clearstop — remove a stop (pick from list)\n"
+            f"/sell — sell a position (pick from list, confirms)\n"
+            f"/arm — arm an event (pick from list)\n"
+            f"/disarm — disarm an event (pick from list)\n"
             f"/mode paper|live — switch execution mode\n"
+            f"/hedge [event] — settlement map, both-win zone, green floors\n"
             f"/help — this message\n"
         )
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
@@ -497,55 +501,202 @@ class KalshiBabyBot:
         lines += errors
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
-    async def _cmd_set_stop(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        if not self._authorized(update):
-            return
-        args = ctx.args or []
-        if len(args) < 2:
-            await update.message.reply_text(
-                f"Usage: /stop &lt;ticker&gt; &lt;price&gt;\n"
-                f"e.g. /stop KXGOLDD-26JUL0217-T4039 0.75",
-                parse_mode=ParseMode.HTML,
-            )
-            return
-        ticker = args[0]
-        try:
-            price = float(args[1])
-            if price > 1:
-                price = price / 100  # accept cents input e.g. 75 → 0.75
-        except ValueError:
-            await update.message.reply_text(f"Invalid price: {args[1]}")
-            return
+    # -----------------------------------------------------------------------
+    # Picker helpers — one-tap lists so nothing needs to be typed by hand
+    # -----------------------------------------------------------------------
 
-        # Find position and set bot config
-        found = False
+    @staticmethod
+    def _parse_price(s: str) -> Optional[float]:
+        try:
+            price = float(s)
+        except ValueError:
+            return None
+        if price > 1:
+            price = price / 100  # accept cents input e.g. 75 → 0.75
+        return price if 0 < price < 1 else None
+
+    def _open_positions(self):
+        """[(eng, position), ...] for all open positions."""
+        out = []
+        for eng in self.engine.event_engines.values():
+            for p in eng.positions:
+                if p.count > 0:
+                    out.append((eng, p))
+        return out
+
+    def _positions_keyboard(self, cb_prefix: str) -> Optional[InlineKeyboardMarkup]:
+        rows = []
+        for eng, p in self._open_positions():
+            strike = p.ticker.split("-")[-1]
+            label = (f"{eng.event_ticker.split('-')[0]} {strike} "
+                     f"{p.side.upper()} ×{p.count} @ {_cents(p.current_mid)}")
+            rows.append([InlineKeyboardButton(
+                label, callback_data=f"{cb_prefix}{p.ticker}")])
+        return InlineKeyboardMarkup(rows) if rows else None
+
+    def _events_keyboard(self, cb_prefix: str, armed: Optional[bool]) -> Optional[InlineKeyboardMarkup]:
+        rows = []
+        for et, eng in self.engine.event_engines.items():
+            if armed is not None and eng.armed != armed:
+                continue
+            n = sum(1 for p in eng.positions if p.count > 0)
+            rows.append([InlineKeyboardButton(
+                f"{et} ({n} pos)", callback_data=f"{cb_prefix}{et}")])
+        return InlineKeyboardMarkup(rows) if rows else None
+
+    def _suggest_event(self, wrong: str) -> Optional[str]:
+        import difflib
+        matches = difflib.get_close_matches(
+            wrong.upper(), list(self.engine.event_engines.keys()), n=1, cutoff=0.6)
+        return matches[0] if matches else None
+
+    def _apply_stop(self, ticker: str, price: float) -> Optional[str]:
+        """Set a stop bot for a ticker. Returns event_ticker or None if not found.
+        Stores the NESTED config shape the engine reads — the old flat shape
+        raised KeyError in _execute_position_bots and aborted the whole tick."""
         for eng in self.engine.event_engines.values():
             p = next((x for x in eng.positions if x.ticker == ticker), None)
             if p:
                 self.engine.position_bots[ticker] = {
+                    "ticker": ticker,
                     "event_ticker": eng.event_ticker,
-                    "stop_loss": price,
-                    "harvest": False,
+                    "config": {"stop_loss": price, "harvest": False},
+                    "created_ts": __import__("time").time(),
                 }
-                found = True
+                self.engine.log(f"Stop set via Telegram: {ticker} @ {price:.2f}")
+                return eng.event_ticker
+        return None
+
+    async def _cmd_set_stop(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._authorized(update):
+            return
+        args = ctx.args or []
+
+        # /stop <price> — pick the position from a list
+        if len(args) == 1:
+            price = self._parse_price(args[0])
+            if price is None:
                 await update.message.reply_text(
-                    f"{EMOJI['shield']} Stop loss set: "
-                    f"<b>{ticker}</b> @ {_cents(price)}",
+                    f"Usage: /stop &lt;price&gt; (pick position)\n"
+                    f"or /stop &lt;ticker&gt; &lt;price&gt;",
                     parse_mode=ParseMode.HTML,
                 )
-                break
-
-        if not found:
+                return
+            kb = self._positions_keyboard(f"stoppick_{int(round(price * 100))}_")
+            if kb is None:
+                await update.message.reply_text("No open positions.")
+                return
             await update.message.reply_text(
-                f"{EMOJI['cross']} Position not found: {ticker}"
+                f"{EMOJI['shield']} Set stop @ {_cents(price)} on which position?",
+                parse_mode=ParseMode.HTML, reply_markup=kb,
             )
+            return
+
+        if len(args) < 2:
+            await update.message.reply_text(
+                f"Usage:\n"
+                f"/stop &lt;price&gt; — pick position from list\n"
+                f"/stop &lt;ticker&gt; &lt;price&gt; — direct",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        ticker = args[0]
+        price = self._parse_price(args[1])
+        if price is None:
+            await update.message.reply_text(f"Invalid price: {args[1]}")
+            return
+        et = self._apply_stop(ticker, price)
+        if et:
+            await update.message.reply_text(
+                f"{EMOJI['shield']} Stop loss set: <b>{ticker}</b> @ {_cents(price)}",
+                parse_mode=ParseMode.HTML,
+            )
+        else:
+            await update.message.reply_text(
+                f"{EMOJI['cross']} Position not found: {ticker}\n"
+                f"Tip: /stop {args[1]} shows a pick list.",
+            )
+
+    async def _cmd_stop_event(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        /stopevent <price> — pick an event, set the stop on EVERY open leg.
+        /stopevent <event_ticker> <price> — direct.
+        """
+        if not self._authorized(update):
+            return
+        args = ctx.args or []
+        if len(args) == 1:
+            price = self._parse_price(args[0])
+            if price is None:
+                await update.message.reply_text(
+                    "Usage: /stopevent &lt;price&gt; or /stopevent &lt;event&gt; &lt;price&gt;",
+                    parse_mode=ParseMode.HTML)
+                return
+            kb = self._events_keyboard(f"stopev_{int(round(price * 100))}_", armed=None)
+            if kb is None:
+                await update.message.reply_text("No events tracked.")
+                return
+            await update.message.reply_text(
+                f"{EMOJI['shield']} Set stop @ {_cents(price)} on ALL legs of which event?",
+                parse_mode=ParseMode.HTML, reply_markup=kb,
+            )
+            return
+        if len(args) >= 2:
+            et = args[0].upper()
+            price = self._parse_price(args[1])
+            if price is None:
+                await update.message.reply_text(f"Invalid price: {args[1]}")
+                return
+            n = self._apply_stop_event(et, price)
+            if n is None:
+                sug = self._suggest_event(et)
+                hint = f"\nDid you mean <b>{sug}</b>?" if sug else ""
+                await update.message.reply_text(
+                    f"{EMOJI['cross']} Event not found: {et}{hint}",
+                    parse_mode=ParseMode.HTML)
+            else:
+                await update.message.reply_text(
+                    f"{EMOJI['shield']} Stop @ {_cents(price)} set on "
+                    f"<b>{n}</b> legs of {et}", parse_mode=ParseMode.HTML)
+            return
+        await update.message.reply_text(
+            "Usage: /stopevent &lt;price&gt; or /stopevent &lt;event&gt; &lt;price&gt;",
+            parse_mode=ParseMode.HTML)
+
+    def _apply_stop_event(self, event_ticker: str, price: float) -> Optional[int]:
+        eng = self.engine.event_engines.get(event_ticker)
+        if eng is None:
+            return None
+        n = 0
+        for p in eng.positions:
+            if p.count > 0 and self._apply_stop(p.ticker, price):
+                n += 1
+        return n
 
     async def _cmd_clear_stop(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._authorized(update):
             return
         args = ctx.args or []
         if not args:
-            await update.message.reply_text("Usage: /clearstop &lt;ticker&gt;", parse_mode=ParseMode.HTML)
+            bots = self.engine.position_bots
+            if not bots:
+                await update.message.reply_text("No bot configs set.")
+                return
+            rows = []
+            for ticker, bot in bots.items():
+                cfg = bot.get("config") if isinstance(bot.get("config"), dict) else bot
+                stop = cfg.get("stop_loss")
+                label = ticker.split("-", 1)[-1]
+                if stop is not None:
+                    label += f" (stop {_cents(float(stop))})"
+                rows.append([InlineKeyboardButton(
+                    label, callback_data=f"clearstoppick_{ticker}")])
+            await update.message.reply_text(
+                f"{EMOJI['gear']} Clear which bot?",
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(rows),
+            )
             return
         ticker = args[0]
         removed = self.engine.position_bots.pop(ticker, None)
@@ -559,12 +710,43 @@ class KalshiBabyBot:
                 f"{EMOJI['info']} No bot config found for {ticker}"
             )
 
+    def _sell_confirm_payload(self, eng, p):
+        """Register a pending manual sell and return (text, keyboard)."""
+        callback_id = f"manual_{p.ticker}"
+        self._pending_sells[callback_id] = (eng, p, p.count)
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                f"✅ Sell {p.count} {p.side.upper()} {p.ticker}",
+                callback_data=f"confirm_{callback_id}",
+            ),
+            InlineKeyboardButton(
+                "❌ Cancel",
+                callback_data=f"cancel_{callback_id}",
+            ),
+        ]])
+        text = (
+            f"{EMOJI['warn']} <b>Confirm sell?</b>\n"
+            f"Ticker: {p.ticker}\n"
+            f"Side: {p.side.upper()}\n"
+            f"Qty: {p.count}\n"
+            f"Avg: {_cents(p.avg_price)} | Mid: {_cents(p.current_mid)}\n"
+            f"Est P/L: {_fmt_pl(p.count * (p.current_mid - p.avg_price))}"
+        )
+        return text, keyboard
+
     async def _cmd_sell(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._authorized(update):
             return
         args = ctx.args or []
         if not args:
-            await update.message.reply_text("Usage: /sell &lt;ticker&gt;", parse_mode=ParseMode.HTML)
+            kb = self._positions_keyboard("sellpick_")
+            if kb is None:
+                await update.message.reply_text("No open positions.")
+                return
+            await update.message.reply_text(
+                f"{EMOJI['warn']} Sell which position?",
+                parse_mode=ParseMode.HTML, reply_markup=kb,
+            )
             return
         ticker = args[0]
 
@@ -572,35 +754,15 @@ class KalshiBabyBot:
         for eng in self.engine.event_engines.values():
             p = next((x for x in eng.positions if x.ticker == ticker), None)
             if p:
-                # Prefix "manual_" so _on_callback routes this through the
-                # confirm_manual_ / cancel_manual_ branch. Was "sell_", which
-                # matched no branch and made /sell buttons silently dead.
-                callback_id = f"manual_{ticker}"
-                self._pending_sells[callback_id] = (eng, p, p.count)
-                keyboard = InlineKeyboardMarkup([[
-                    InlineKeyboardButton(
-                        f"✅ Sell {p.count} {p.side.upper()} {ticker}",
-                        callback_data=f"confirm_{callback_id}",
-                    ),
-                    InlineKeyboardButton(
-                        "❌ Cancel",
-                        callback_data=f"cancel_{callback_id}",
-                    ),
-                ]])
+                text, keyboard = self._sell_confirm_payload(eng, p)
                 await update.message.reply_text(
-                    f"{EMOJI['warn']} <b>Confirm sell?</b>\n"
-                    f"Ticker: {ticker}\n"
-                    f"Side: {p.side.upper()}\n"
-                    f"Qty: {p.count}\n"
-                    f"Avg: {_cents(p.avg_price)} | Mid: {_cents(p.current_mid)}\n"
-                    f"Est P/L: {_fmt_pl(p.count * (p.current_mid - p.avg_price))}",
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=keyboard,
+                    text, parse_mode=ParseMode.HTML, reply_markup=keyboard,
                 )
                 return
 
         await update.message.reply_text(
-            f"{EMOJI['cross']} Position not found: {ticker}"
+            f"{EMOJI['cross']} Position not found: {ticker}\n"
+            f"Tip: /sell with no arguments shows a pick list."
         )
 
     async def _cmd_arm(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -608,9 +770,19 @@ class KalshiBabyBot:
             return
         args = ctx.args or []
         if not args:
-            await update.message.reply_text("Usage: /arm &lt;event_ticker&gt;", parse_mode=ParseMode.HTML)
+            kb = self._events_keyboard("armpick_", armed=False)
+            if kb is None:
+                await update.message.reply_text(
+                    "No disarmed events — everything tracked is already armed "
+                    "(or nothing is tracked)."
+                )
+                return
+            await update.message.reply_text(
+                f"{EMOJI['fire']} Arm which event?",
+                parse_mode=ParseMode.HTML, reply_markup=kb,
+            )
             return
-        et = args[0]
+        et = args[0].upper()
         try:
             self.engine.arm_event(et, True)
             await update.message.reply_text(
@@ -618,16 +790,26 @@ class KalshiBabyBot:
                 parse_mode=ParseMode.HTML,
             )
         except Exception as e:
-            await update.message.reply_text(f"{EMOJI['cross']} Error: {e}")
+            sug = self._suggest_event(et)
+            hint = f"\nDid you mean <b>{sug}</b>? Try /arm with no arguments." if sug else ""
+            await update.message.reply_text(
+                f"{EMOJI['cross']} Error: {e}{hint}", parse_mode=ParseMode.HTML)
 
     async def _cmd_disarm(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._authorized(update):
             return
         args = ctx.args or []
         if not args:
-            await update.message.reply_text("Usage: /disarm &lt;event_ticker&gt;", parse_mode=ParseMode.HTML)
+            kb = self._events_keyboard("disarmpick_", armed=True)
+            if kb is None:
+                await update.message.reply_text("No armed events.")
+                return
+            await update.message.reply_text(
+                f"{EMOJI['shield']} Disarm which event?",
+                parse_mode=ParseMode.HTML, reply_markup=kb,
+            )
             return
-        et = args[0]
+        et = args[0].upper()
         try:
             self.engine.arm_event(et, False)
             await update.message.reply_text(
@@ -635,7 +817,10 @@ class KalshiBabyBot:
                 parse_mode=ParseMode.HTML,
             )
         except Exception as e:
-            await update.message.reply_text(f"{EMOJI['cross']} Error: {e}")
+            sug = self._suggest_event(et)
+            hint = f"\nDid you mean <b>{sug}</b>? Try /disarm with no arguments." if sug else ""
+            await update.message.reply_text(
+                f"{EMOJI['cross']} Error: {e}{hint}", parse_mode=ParseMode.HTML)
 
     async def _cmd_mode(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._authorized(update):
@@ -670,6 +855,68 @@ class KalshiBabyBot:
     # -----------------------------------------------------------------------
     # Inline keyboard callbacks
     # -----------------------------------------------------------------------
+
+    async def _cmd_hedge(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        /hedge [event_ticker] — on-demand settlement map, both-win zone,
+        and per-leg green floors for an event's current structure.
+        With one tracked event the argument is optional.
+        """
+        if not self._authorized(update):
+            return
+        advisor = getattr(self.engine, "hedge_advisor", None)
+        if advisor is None:
+            await update.message.reply_text("Hedge advisor not available.")
+            return
+        engines = self.engine.event_engines
+        if not engines:
+            await update.message.reply_text("No events tracked.")
+            return
+        if ctx.args:
+            et = ctx.args[0].upper()
+        elif len(engines) == 1:
+            et = next(iter(engines))
+        else:
+            await update.message.reply_text(
+                "Multiple events tracked — specify one:\n"
+                + "\n".join(f"/hedge {e}" for e in engines)
+            )
+            return
+        try:
+            res = advisor.evaluate_for_api(et)
+        except KeyError:
+            await self._send(update.effective_chat.id, f"Event not tracked: {et}")
+            return
+        except Exception as e:
+            await self._send(update.effective_chat.id, f"Hedge eval failed: {e}")
+            return
+        before = res["before"]
+        eng = engines[et]
+        legs = advisor.legs_from_engine(eng)
+        cash_in, cash_out = advisor.ledger_from_engine(eng)
+        import hedge_math as _hm
+        lines = [f"{EMOJI['shield']} <b>Structure</b> — {et}"]
+        spot = eng.consensus_price()
+        if spot is not None:
+            lines.append(f"Spot: {spot:g}")
+        lines.append(f"Both-win: {self._fmt_zone(before['both_win_zones'])}")
+        lines.append(
+            f"Worst/best net: {_fmt_pl(before['worst_net'])} / {_fmt_pl(before['best_net'])}"
+        )
+        lines.append("")
+        lines.append("<b>Green floors</b> (others hold):")
+        for leg in legs:
+            f = _hm.green_floor(legs, str(leg["ticker"]), cash_in, cash_out)
+            strike = str(leg["ticker"]).split("-")[-1]
+            lines.append(
+                f"  {strike} {leg['side'].upper()} ×{leg['count']} "
+                f"@ {_cents(leg['mid'])}: {self._fmt_floor(f)}"
+            )
+        lines.append("")
+        lines.append("<b>Settlement map</b>:")
+        for row in before["map"]:
+            lines.append(f"  {row['settle']:g} → {_fmt_pl(row['net'])}")
+        await self._send(update.effective_chat.id, "\n".join(lines))
 
     async def _on_callback(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -725,6 +972,136 @@ class KalshiBabyBot:
                 f"Monitor manually.",
                 parse_mode=ParseMode.HTML,
             )
+
+        # Hedge advisor cards: hedge_full_{opt}_{card_id} / hedge_harv_{card_id}
+        # / hedge_skip_{card_id}
+        elif data.startswith("hedge_full_"):
+            rest = data[len("hedge_full_"):]
+            opt_s, _, card_id = rest.partition("_")
+            advisor = getattr(self.engine, "hedge_advisor", None)
+            if advisor is None:
+                await query.edit_message_text(f"{EMOJI['cross']} Hedge advisor not available.")
+                return
+            result = await advisor.execute_card(card_id, "full", int(opt_s or 0))
+            if result.get("ok"):
+                hedge = result.get("hedge") or {}
+                buy = hedge.get("buy") or {}
+                buy_note = "paper" if buy.get("paper") else ("placed" if buy.get("ok") else f"FAILED: {buy.get('error') or buy.get('status_code')}")
+                await query.edit_message_text(
+                    f"{EMOJI['check']} <b>Harvest + hedge executed</b>\n"
+                    f"Sold: <code>{result.get('harvested')}</code>\n"
+                    f"Hedge buy <code>{hedge.get('ticker','—')}</code>: {buy_note}",
+                    parse_mode=ParseMode.HTML,
+                )
+            else:
+                await query.edit_message_text(
+                    f"{EMOJI['cross']} Hedge card failed: {result.get('error')}"
+                )
+
+        elif data.startswith("hedge_harv_"):
+            card_id = data[len("hedge_harv_"):]
+            advisor = getattr(self.engine, "hedge_advisor", None)
+            if advisor is None:
+                await query.edit_message_text(f"{EMOJI['cross']} Hedge advisor not available.")
+                return
+            result = await advisor.execute_card(card_id, "harvest_only")
+            if result.get("ok"):
+                await query.edit_message_text(
+                    f"{EMOJI['check']} <b>Harvest executed</b> (no hedge): "
+                    f"<code>{result.get('harvested')}</code>",
+                    parse_mode=ParseMode.HTML,
+                )
+            else:
+                await query.edit_message_text(
+                    f"{EMOJI['cross']} Harvest failed: {result.get('error')}"
+                )
+
+        elif data.startswith("hedge_skip_"):
+            card_id = data[len("hedge_skip_"):]
+            advisor = getattr(self.engine, "hedge_advisor", None)
+            if advisor is not None:
+                advisor.pending_cards.pop(card_id, None)
+            await query.edit_message_text(
+                f"{EMOJI['cross']} Hedge suggestion skipped. Positions unchanged."
+            )
+
+        elif data.startswith("hedge_ack_"):
+            await query.edit_message_text(
+                f"{EMOJI['check']} Hold advisory acknowledged."
+            )
+
+        # Picker callbacks — one-tap versions of the typed commands
+        elif data.startswith("armpick_"):
+            et = data[len("armpick_"):]
+            try:
+                self.engine.arm_event(et, True)
+                await query.edit_message_text(
+                    f"{EMOJI['fire']} <b>{et}</b> ARMED", parse_mode=ParseMode.HTML)
+            except Exception as e:
+                await query.edit_message_text(f"{EMOJI['cross']} Error: {e}")
+
+        elif data.startswith("disarmpick_"):
+            et = data[len("disarmpick_"):]
+            try:
+                self.engine.arm_event(et, False)
+                await query.edit_message_text(
+                    f"{EMOJI['shield']} <b>{et}</b> DISARMED", parse_mode=ParseMode.HTML)
+            except Exception as e:
+                await query.edit_message_text(f"{EMOJI['cross']} Error: {e}")
+
+        elif data.startswith("sellpick_"):
+            ticker = data[len("sellpick_"):]
+            for eng in self.engine.event_engines.values():
+                p = next((x for x in eng.positions if x.ticker == ticker and x.count > 0), None)
+                if p:
+                    text, keyboard = self._sell_confirm_payload(eng, p)
+                    await query.edit_message_text(
+                        text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+                    return
+            await query.edit_message_text(f"{EMOJI['cross']} Position no longer open: {ticker}")
+
+        elif data.startswith("stoppick_"):
+            rest = data[len("stoppick_"):]
+            cents_s, _, ticker = rest.partition("_")
+            try:
+                price = int(cents_s) / 100.0
+            except ValueError:
+                await query.edit_message_text(f"{EMOJI['cross']} Bad stop callback: {data}")
+                return
+            et = self._apply_stop(ticker, price)
+            if et:
+                await query.edit_message_text(
+                    f"{EMOJI['shield']} Stop loss set: <b>{ticker}</b> @ {_cents(price)}",
+                    parse_mode=ParseMode.HTML)
+            else:
+                await query.edit_message_text(
+                    f"{EMOJI['cross']} Position no longer open: {ticker}")
+
+        elif data.startswith("stopev_"):
+            rest = data[len("stopev_"):]
+            cents_s, _, et = rest.partition("_")
+            try:
+                price = int(cents_s) / 100.0
+            except ValueError:
+                await query.edit_message_text(f"{EMOJI['cross']} Bad stopevent callback: {data}")
+                return
+            n = self._apply_stop_event(et, price)
+            if n is None:
+                await query.edit_message_text(f"{EMOJI['cross']} Event no longer tracked: {et}")
+            else:
+                await query.edit_message_text(
+                    f"{EMOJI['shield']} Stop @ {_cents(price)} set on <b>{n}</b> legs of {et}",
+                    parse_mode=ParseMode.HTML)
+
+        elif data.startswith("clearstoppick_"):
+            ticker = data[len("clearstoppick_"):]
+            removed = self.engine.position_bots.pop(ticker, None)
+            if removed:
+                await query.edit_message_text(
+                    f"{EMOJI['check']} Bot cleared: <b>{ticker}</b>",
+                    parse_mode=ParseMode.HTML)
+            else:
+                await query.edit_message_text(f"{EMOJI['info']} No bot found for {ticker}")
 
         # Live mode confirmation
         elif data == "confirm_setlive":
@@ -895,6 +1272,34 @@ class KalshiBabyBot:
     # Stop loss confirmation alert (called by engine when stop fires in live mode)
     # -----------------------------------------------------------------------
 
+    async def send_stop_triggered_notice(self, ticker: str, side: str, qty: int,
+                                         mid: float, stop: float, why: str) -> None:
+        """
+        Stop condition met but NOT auto-selling (event disarmed or paper
+        mode). Pure notification with an optional one-tap manual sell —
+        the bot config stays in place either way. Sent throttled (5 min)
+        by the engine while the condition persists.
+        """
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                f"💰 Sell now ({qty} {side.upper()})",
+                callback_data=f"confirm_stop_{ticker}",
+            ),
+            InlineKeyboardButton(
+                "👌 Keep holding",
+                callback_data=f"cancel_stop_{ticker}",
+            ),
+        ]])
+        await self._broadcast(
+            f"{EMOJI['warn']} <b>Stop TRIGGERED — not sold</b> ({why})\n"
+            f"Ticker: <code>{ticker}</code>\n"
+            f"Side: {side.upper()} ×{qty}\n"
+            f"Mid: {_cents(mid)} | Stop: {_cents(stop)}\n\n"
+            f"Stop stays armed; you'll be re-alerted every 5 min while "
+            f"the condition holds. Tip: /hedge shows this leg's green floor.",
+            reply_markup=keyboard,
+        )
+
     async def send_stop_loss_alert(self, ticker: str, side: str, qty: int,
                                    mid: float, stop: float) -> None:
         """
@@ -974,6 +1379,104 @@ class KalshiBabyBot:
             f"Mid: {_cents(position.current_mid)}\n\n"
             f"Waiting for your confirmation — no answer = no sale.",
             reply_markup=keyboard,
+        )
+
+    # -----------------------------------------------------------------------
+    # Hedge advisor cards
+    # -----------------------------------------------------------------------
+
+    @staticmethod
+    def _fmt_zone(zones) -> str:
+        if not zones:
+            return "none (one wing must lose)"
+        lo, hi = zones[0]
+        lo_s = "-∞" if lo == float("-inf") else f"{lo:g}"
+        hi_s = "+∞" if hi == float("inf") else f"{hi:g}"
+        return f"{lo_s} → {hi_s}"
+
+    @staticmethod
+    def _fmt_floor(f) -> str:
+        if f is None:
+            return "FREE RIDE (green even at $0)"
+        if f == float("inf"):
+            return "unreachable (red regardless)"
+        return _cents(f)
+
+    async def send_hedge_card(self, card: dict) -> None:
+        """
+        Render a hedge-advisor card. 'reposition' cards get action buttons
+        (approve = execute; no answer = nothing happens). 'hold' cards are
+        pure information — the free-ride advisory.
+        """
+        if card["kind"] == "hold":
+            leg = card["leg"]
+            await self._broadcast(
+                f"{EMOJI['shield']} <b>HOLD advisory</b> — {card['event_ticker']}\n"
+                f"<code>{leg['ticker']}</code> {leg['side'].upper()} ×{leg['qty']} "
+                f"looks scary at {_cents(leg['mid'])} (entry {_cents(leg['avg_price'])})\n"
+                f"Green floor: <b>{self._fmt_floor(card['green_floor'])}</b>\n"
+                f"Structure worst/best: {_fmt_pl(card['worst_net'])} / {_fmt_pl(card['best_net'])}\n\n"
+                f"The structure already covers this leg. Selling here forfeits "
+                f"${leg['qty']:.0f} of recovery upside for {_cents(leg['mid'])} on the dollar.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("👍 Got it", callback_data=f"hedge_ack_{card['card_id']}"),
+                ]]),
+            )
+            return
+
+        # reposition card
+        h = card["harvest"]
+        cid = card["card_id"]
+        bleed_str = ", ".join(
+            f"{b['ticker'].split('-')[-1]}@{_cents(b['mid'])}" for b in card["bleeding"]
+        )
+        lines = [
+            f"{EMOJI['warn']} <b>Harvest &amp; Reposition</b> — {card['event_ticker']}",
+            f"Spot: {card['spot']:g}",
+            f"Fat wing: <code>{h['ticker']}</code> {h['side'].upper()} ×{h['qty']} "
+            f"at {_cents(h['price'])} (entry {_cents(h['avg_price'])})",
+            f"Bleeding: {bleed_str}",
+            "",
+        ]
+        buttons = []
+        for i, opt in enumerate(card["options"]):
+            hg = opt["hedge"]
+            floors = opt["green_floors"]
+            worst_floor = min(
+                (f for f in floors.values() if f is not None and f != float("inf")),
+                default=None,
+            )
+            floor_note = (
+                "all legs FREE RIDE" if worst_floor is None
+                else f"tightest floor {_cents(worst_floor)}"
+            )
+            lines.append(
+                f"<b>Option {i + 1}</b>: buy ×{hg['count']} {hg['side'].upper()} "
+                f"T{hg['strike']:g} @ {_cents(hg['avg_price'])}\n"
+                f"  Locks {_fmt_pl(opt['harvested_pl'])} | both-win "
+                f"{self._fmt_zone(opt['both_win_zones'])} → {_fmt_pl(opt['best_net'])}\n"
+                f"  Worst {_fmt_pl(opt['worst_net'])} | {floor_note}"
+            )
+            buttons.append(InlineKeyboardButton(
+                f"✅ Opt {i + 1}: harvest + T{hg['strike']:g}",
+                callback_data=f"hedge_full_{i}_{cid}",
+            ))
+        ho = card["harvest_only"]
+        lines.append(
+            f"<b>Harvest only</b>: locks {_fmt_pl(ho['harvested_pl'])} | "
+            f"worst {_fmt_pl(ho['worst_net'])} / best {_fmt_pl(ho['best_net'])}"
+        )
+        lines.append("")
+        lines.append("No answer = no trade.")
+
+        keyboard_rows = [[b] for b in buttons]
+        keyboard_rows.append([
+            InlineKeyboardButton("🌾 Harvest only", callback_data=f"hedge_harv_{cid}"),
+            InlineKeyboardButton("❌ Skip", callback_data=f"hedge_skip_{cid}"),
+        ])
+        await self._broadcast(
+            "\n".join(lines),
+            reply_markup=InlineKeyboardMarkup(keyboard_rows),
         )
 
 # ---------------------------------------------------------------------------

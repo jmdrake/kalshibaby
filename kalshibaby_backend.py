@@ -31,6 +31,7 @@ import os
 import requests
 import yaml
 from wapner_checklist import evaluate_event_wapner
+from hedge_advisor import HedgeAdvisor
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -149,6 +150,10 @@ class RuntimeParams(BaseModel):
     sources: Dict[str, Dict[str, Any]]
     safety: Dict[str, float] = Field(default_factory=lambda: {"global_drawdown_limit": -50.0})
     entry_zone: Dict[str, float] = Field(default_factory=lambda: {"min": 0.70, "max": 0.80})
+    hedge_advisor: Dict[str, float] = Field(default_factory=lambda: {
+        "enabled": 1, "harvest_at": 0.90, "bleed_at": 0.60, "scared_at": 0.30,
+        "hedge_zone_min": 0.40, "hedge_zone_max": 0.75, "realert_seconds": 600,
+    })
 
 
 class PricePoint(BaseModel):
@@ -849,6 +854,13 @@ class EventEngine:
         self.shock_extreme: Optional[float] = None
         self.shock_direction: Optional[Literal["up", "down"]] = None
 
+        # Realized-cash ledger for the hedge advisor: estimated proceeds of
+        # executed sells (at the bid in effect when they fired) and the cost
+        # basis of the contracts closed. Lets green-floor math include
+        # harvested profit, matching the manual spreadsheet.
+        self.realized_cash_in: float = 0.0
+        self.realized_cost_closed: float = 0.0
+
         # Persistent per-engine spot sources preserve throttle cache across ticks.
         self._oilprice_source: Optional[OilPriceSource] = None
         self._goldprice_source: Optional[GoldPriceSource] = None
@@ -1167,6 +1179,9 @@ class EventEngine:
         p.count -= qty
         result = await self.kalshi.sell_position(p.ticker, p.side, qty)
         if result.get("ok"):
+            fill_est = p.current_bid or p.current_mid or 0.0
+            self.realized_cash_in += qty * fill_est
+            self.realized_cost_closed += qty * p.avg_price
             self.log(f"SOLD {qty} {p.side.upper()} {p.ticker}")
         else:
             p.count += qty  # Restore on failure so it can retry
@@ -1307,6 +1322,11 @@ class Engine:
             actions_queue=self.actions,
             logs_queue=self.logs,
         )
+
+        # Hedge advisor — watches for harvest/reposition and free-ride-hold
+        # situations, sends cards via Telegram. Advisory only; executes
+        # nothing without a user tap.
+        self.hedge_advisor = HedgeAdvisor(self)
 
         # Bootstrap from config positions (bootstrap survives even if portfolio sync fails).
         if config.get("event_ticker") and config.get("positions"):
@@ -1475,6 +1495,7 @@ class Engine:
             eng.evaluate_state_machine()
         # self._check_global_safety()  # PERMANENTLY DISABLED — avg_price bugs make this unreliable
         await self._execute_position_bots()
+        await self.hedge_advisor.check()
 
     async def _execute_position_bots(self) -> None:
         """
@@ -1497,7 +1518,11 @@ class Engine:
                 bot = self.position_bots.get(p.ticker)
                 if not bot:
                     continue
-                cfg = bot["config"]
+                # Accept both shapes: nested {"config": {...}} from the UI /
+                # fixed Telegram commands, and legacy flat dicts from older
+                # Telegram /stop. A flat dict here previously raised KeyError
+                # and aborted the ENTIRE tick (killing all bots + advisor).
+                cfg = bot.get("config") if isinstance(bot.get("config"), dict) else bot
                 mid = p.current_bid or p.current_mid
                 if not mid:
                     continue
@@ -1527,14 +1552,36 @@ class Engine:
                         reason = f"Bot stop loss: mid {mid:.2f} <= stop {stop:.2f}"
                         if actual_cushion is not None:
                             reason += f" (spot cushion {actual_cushion:.2f})"
-                        eng._add_action("danger", "SELL_LEG", reason,
-                            p.ticker, p.side, p.count)
                         if self.params.mode == "live" and eng.armed:
+                            eng._add_action("danger", "SELL_LEG", reason,
+                                p.ticker, p.side, p.count)
                             await eng._execute_sell(p, p.count)
-                        # Remove bot config immediately so portfolio sync
-                        # restoring count before fill is confirmed cannot
-                        # cause the stop to re-fire on the next poll cycle.
-                        self.position_bots.pop(p.ticker, None)
+                            # Remove bot config immediately so portfolio sync
+                            # restoring count before fill is confirmed cannot
+                            # cause the stop to re-fire on the next poll cycle.
+                            self.position_bots.pop(p.ticker, None)
+                        else:
+                            # Disarmed or paper: DO NOT sell, DO NOT clear the
+                            # bot. Alert (throttled) so the user always hears
+                            # about a triggered stop even when it won't act —
+                            # a silent evaporating stop is how July 8 happened.
+                            last = float(bot.get("triggered_alert_ts", 0.0))
+                            if time.time() - last >= 300:
+                                bot["triggered_alert_ts"] = time.time()
+                                why = ("paper mode" if self.params.mode != "live"
+                                       else "event disarmed")
+                                eng._add_action("danger", "ALERT",
+                                    f"STOP TRIGGERED but NOT sold ({why}): {reason}",
+                                    p.ticker, p.side, p.count)
+                                tg = getattr(self, "telegram", None)
+                                if tg is not None:
+                                    try:
+                                        await tg.send_stop_triggered_notice(
+                                            p.ticker, p.side, p.count,
+                                            mid, stop, why,
+                                        )
+                                    except Exception as e:
+                                        self.log(f"Stop notice send failed: {e}")
                         continue  # Don't check other conditions once stop fires
 
                 # ── Limit sell (take profit — requires confirmation) ───────
@@ -1703,6 +1750,51 @@ class Engine:
                 await eng._execute_sell(p, qty or p.count)
                 return {"ok": True}
         raise HTTPException(status_code=404, detail="Position not found")
+
+    async def execute_buy(
+        self, ticker: str, side: Side, qty: int, limit_price_cents: int
+    ) -> Dict[str, Any]:
+        """
+        Shared buy path for /api/execute_buy and approved hedge-advisor cards.
+        Paper mode logs intent; live mode sends an IOC limit order.
+        """
+        if not (1 <= limit_price_cents <= 99) or qty <= 0:
+            return {"ok": False, "error": "invalid qty or limit price"}
+        if self.params.mode != "live":
+            self.log(f"PAPER BUY: {qty} {side.upper()} {ticker} @ {limit_price_cents}¢")
+            return {"ok": True, "paper": True, "ticker": ticker,
+                    "side": side, "qty": qty,
+                    "limit_price": limit_price_cents / 100.0}
+        k = self.kalshi
+        if not k.api_key_id:
+            return {"ok": False, "error": "Kalshi API credentials not configured"}
+        path = "/trade-api/v2/portfolio/orders"
+        url = k.base_url + path
+        price_key = "yes_price" if side == "yes" else "no_price"
+        payload = {
+            "ticker": ticker,
+            "action": "buy",
+            "side": side,
+            "count": qty,
+            "client_order_id": str(uuid.uuid4()),
+            "time_in_force": "ioc",
+            price_key: limit_price_cents,
+        }
+        try:
+            r = requests.post(url, headers=k._auth_headers("POST", path),
+                              json=payload, timeout=10)
+            body = r.json() if r.text else {}
+            if r.ok:
+                self.log(
+                    f"BUY PLACED: {qty} {side.upper()} {ticker} @ {limit_price_cents}¢ "
+                    f"order_id={body.get('order', {}).get('order_id', '?')}"
+                )
+            else:
+                self.log(f"BUY FAILED: {ticker} HTTP {r.status_code}: {r.text[:200]}")
+            return {"ok": r.ok, "status_code": r.status_code, "response": body}
+        except Exception as e:
+            self.log(f"BUY ERROR: {ticker}: {e}")
+            return {"ok": False, "error": str(e)}
 
 
 # ---------------------------------------------------------------------------
@@ -2293,51 +2385,45 @@ async def api_execute_buy(req: BuyRequest):
     if req.qty <= 0:
         raise HTTPException(status_code=400, detail="qty must be positive")
 
-    limit_price = req.limit_price_cents / 100.0
+    result = await engine.execute_buy(
+        ticker=req.ticker, side=req.side, qty=req.qty,
+        limit_price_cents=req.limit_price_cents,
+    )
+    if not result.get("ok") and result.get("error") == "Kalshi API credentials not configured":
+        raise HTTPException(status_code=503, detail=result["error"])
+    return result
 
-    if engine.params.mode != "live":
-        engine.log(
-            f"PAPER BUY: {req.qty} {req.side.upper()} {req.ticker} "
-            f"@ {req.limit_price_cents}¢"
-        )
-        return {"ok": True, "paper": True, "ticker": req.ticker,
-                "side": req.side, "qty": req.qty,
-                "limit_price": limit_price}
 
-    # Live execution
-    k = engine.kalshi
-    if not k.api_key_id:
-        raise HTTPException(status_code=503, detail="Kalshi API credentials not configured")
+# ---------------------------------------------------------------------------
+# Hedge sandbox — the live spreadsheet
+# ---------------------------------------------------------------------------
 
-    path = "/trade-api/v2/portfolio/orders"
-    url = k.base_url + path
-    price_key = "yes_price" if req.side == "yes" else "no_price"
-    payload = {
-        "ticker": req.ticker,
-        "action": "buy",
-        "side": req.side,
-        "count": req.qty,
-        "client_order_id": str(uuid.uuid4()),
-        "time_in_force": "ioc",
-        price_key: req.limit_price_cents,   # Kalshi expects integer cents
-    }
+class HedgeEvalRequest(BaseModel):
+    event_ticker: str
+    # Sell an existing leg in full at this price: {"ticker": ..., "price": 0.90}
+    harvest: Optional[Dict[str, Any]] = None
+    # Buy a hypothetical hedge: {"side","strike","count","price"[,"ticker"]}
+    hedge: Optional[Dict[str, Any]] = None
+    # Additional hypothetical legs already assumed held (same shape as hedge)
+    extra_legs: Optional[List[Dict[str, Any]]] = None
+
+
+@app.post("/api/hedge_eval")
+async def api_hedge_eval(req: HedgeEvalRequest):
+    """
+    Evaluate the current book for an event plus optional hypothetical
+    harvest/hedge moves. Returns before/after settlement maps, both-win
+    zones, worst/best nets, harvested P/L, and per-leg green floors —
+    everything the manual spreadsheet computes, against live positions.
+    With no harvest/hedge supplied, returns the current structure's map.
+    """
     try:
-        r = requests.post(
-            url,
-            headers=k._auth_headers("POST", path),
-            json=payload,
-            timeout=10,
+        return engine.hedge_advisor.evaluate_for_api(
+            req.event_ticker, req.harvest, req.hedge, req.extra_legs,
         )
-        body = r.json() if r.text else {}
-        ok = r.ok
-        if ok:
-            engine.log(
-                f"BUY PLACED: {req.qty} {req.side.upper()} {req.ticker} "
-                f"@ {req.limit_price_cents}¢  order_id={body.get('order', {}).get('order_id','?')}"
-            )
-        else:
-            engine.log(f"BUY FAILED: {req.ticker} HTTP {r.status_code}: {r.text[:200]}")
-        return {"ok": ok, "status_code": r.status_code, "response": body}
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except StopIteration:
+        raise HTTPException(status_code=404, detail="harvest ticker not found in open positions")
     except Exception as e:
-        engine.log(f"BUY ERROR: {req.ticker}: {e}")
-        return {"ok": False, "error": str(e)}
+        raise HTTPException(status_code=400, detail=str(e))
