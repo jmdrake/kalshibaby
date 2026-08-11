@@ -1,35 +1,28 @@
-# Credentials & private keys
-*.pem
-*.key
-*.key.txt
-newkey.txt
-kalshikey2.key.txt
-antropicapikey.txt
-session.json
-
-# Live configs with real API keys / key IDs
-config.yaml
-config.production.yaml
-
-# Logs
-*.log
-*.log.*
+```
+# Database files
+*.db
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
-.venv/
+*.pyd
+.Python
+env/
 venv/
+.venv/
+.ENV/
+.env
 
-# Windows ADS (WSL artifact)
-*:Zone.Identifier
+# Logs
+*.log
 
-# Claude Code workspace
-.claude/
-
-# IDE / OS
+# OS generated files
 .DS_Store
-*.swp
-*~
-*.yaml~
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+```

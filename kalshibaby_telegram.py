@@ -204,6 +204,11 @@ class KalshiBabyBot:
         self._alerted_misc: Set[str] = set()
         # Pending sell confirmations: callback_id → (eng, position, qty)
         self._pending_sells: Dict[str, tuple] = {}
+        # Stop loss alert cooldown: ticker -> last_alert_ts
+        self._stop_loss_cooldown: Dict[str, float] = {}
+        self._stop_loss_cooldown_seconds: float = telegram_cfg.get(
+            "stop_loss_cooldown_seconds", 300.0
+        )  # default 5 minutes
 
         self._app: Optional[Application] = None
         self._poll_task: Optional[asyncio.Task] = None
@@ -1272,6 +1277,17 @@ class KalshiBabyBot:
     # Stop loss confirmation alert (called by engine when stop fires in live mode)
     # -----------------------------------------------------------------------
 
+    async def send_stop_loss_alert(
+        self,
+        ticker: str,
+        side: str,
+        qty: int,
+        mid: float,
+        stop: float,
+        armed: bool,
+        strike: Optional[float] = None,
+        spot: Optional[float] = None,
+    ) -> None:
     async def send_stop_triggered_notice(self, ticker: str, side: str, qty: int,
                                          mid: float, stop: float, why: str) -> None:
         """
@@ -1303,28 +1319,68 @@ class KalshiBabyBot:
     async def send_stop_loss_alert(self, ticker: str, side: str, qty: int,
                                    mid: float, stop: float) -> None:
         """
-        Called by the engine BEFORE executing a stop loss in live mode.
-        Sends a Telegram message with Confirm/Cancel buttons.
-        User has 60 seconds to respond; if no response, sell executes anyway.
+        Called by the engine when a stop loss condition is triggered.
+        Sends a Telegram alert regardless of whether the position is armed.
+
+        If armed: includes Confirm/Cancel buttons for immediate action.
+        If not armed: informational alert only (no action buttons).
+
+        Respects a configurable cooldown to avoid alert fatigue.
+        Also suggests hedge positions if the position is being stopped out.
         """
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton(
-                f"✅ Execute stop sell ({qty} @ {_cents(mid)})",
-                callback_data=f"confirm_stop_{ticker}",
-            ),
-            InlineKeyboardButton(
-                "❌ Skip this time",
-                callback_data=f"cancel_stop_{ticker}",
-            ),
-        ]])
-        await self._broadcast(
-            f"{EMOJI['danger']} <b>Stop loss triggered</b>\n"
-            f"Ticker: {ticker}\n"
-            f"Side: {side.upper()} ×{qty}\n"
-            f"Mid: {_cents(mid)} | Stop: {_cents(stop)}\n\n"
-            f"Respond within 60s or sell executes automatically.",
-            reply_markup=keyboard,
-        )
+        import time as _time
+        now = _time.time()
+
+        # Cooldown check
+        last_alert = self._stop_loss_cooldown.get(ticker, 0.0)
+        if now - last_alert < self._stop_loss_cooldown_seconds:
+            return  # Still in cooldown
+        self._stop_loss_cooldown[ticker] = now
+
+        # Build the message
+        emoji = EMOJI["danger"] if armed else EMOJI["warn"]
+        armed_status = "ARMED" if armed else "NOT ARMED"
+        msg_lines = [
+            f"{emoji} <b>Stop Loss Event</b>",
+            f"Ticker: <code>{ticker}</code>",
+            f"Side: {side.upper()} ×{qty}",
+            f"Armed: {armed_status}",
+            f"Mid: {_cents(mid)} | Stop: {_cents(stop)}",
+        ]
+        if strike is not None:
+            msg_lines.append(f"Strike: {strike}")
+        if spot is not None:
+            msg_lines.append(f"Spot: {spot}")
+
+        keyboard = None
+        if armed:
+            # Include action buttons for armed positions
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    f"✅ Execute sell ({qty} @ {_cents(mid)})",
+                    callback_data=f"confirm_stop_{ticker}",
+                ),
+                InlineKeyboardButton(
+                    "❌ Skip this time",
+                    callback_data=f"cancel_stop_{ticker}",
+                ),
+            ]])
+            msg_lines.append("")
+            msg_lines.append("Respond within 60s or sell executes automatically.")
+        else:
+            msg_lines.append("")
+            msg_lines.append("Position is NOT armed — no auto-execution.")
+            msg_lines.append("Consider hedging or manually closing.")
+
+        # Add hedge suggestions if available
+        hedge_suggestions = await self._get_hedge_suggestions(ticker, side, qty)
+        if hedge_suggestions:
+            msg_lines.append("")
+            msg_lines.append("<b>Suggested Hedges:</b>")
+            for i, hedge in enumerate(hedge_suggestions[:3], 1):
+                msg_lines.append(f"  {i}. {hedge}")
+
+        await self._broadcast("\n".join(msg_lines), reply_markup=keyboard)
 
     # Suppress re-alerts on the same pending sell for this long (seconds).
     # Long enough that a still-triggered condition on every 3s tick doesn't
@@ -1332,7 +1388,100 @@ class KalshiBabyBot:
     # condition genuinely persists past a few minutes.
     PENDING_REALERT_SECONDS = 300  # 5 minutes
 
-    async def request_sell_confirmation(self, eng, position, qty, reason):
+    async def _get_hedge_suggestions(
+        self,
+        ticker: str,
+        side: str,
+        qty: int,
+    ) -> list:
+        """
+        Generate hedge suggestions for a position being stopped out.
+        Uses hedge_math.py logic to find offsetting positions.
+        
+        Returns a list of formatted hedge suggestion strings.
+        """
+        try:
+            from kalshibaby_backend import EventEngine
+            from typing import Dict, List
+            
+            suggestions = []
+            
+            # Find the event engine for this ticker
+            target_eng = None
+            for eng in self.engine.event_engines.values():
+                for p in eng.positions:
+                    if p.ticker == ticker:
+                        target_eng = eng
+                        break
+                if target_eng:
+                    break
+            
+            if not target_eng:
+                return suggestions
+            
+            # Get current spot price
+            spot = target_eng.consensus_price()
+            if not spot:
+                return suggestions
+            
+            # Look for opposite-side contracts in the same event
+            event_ticker = target_eng.event_ticker
+            prefix = event_ticker.split("-")[0]
+            
+            # Scan all events for potential hedges
+            for et, eng in self.engine.event_engines.items():
+                if not eng.positions:
+                    continue
+                    
+                # Check if same underlying (same prefix)
+                eng_prefix = et.split("-")[0]
+                if eng_prefix != prefix:
+                    continue  # Different underlying
+                
+                # Get the best candidate contract for hedging
+                for p in eng.positions:
+                    if p.count <= 0:
+                        continue
+                    
+                    # Hedge logic: if we're long YES, look for NO contracts
+                    # If we're long NO, look for YES contracts
+                    hedge_side = "no" if side == "yes" else "yes"
+                    
+                    if p.side != hedge_side:
+                        continue
+                    
+                    # Calculate basic hedge ratio (simplified)
+                    hedge_qty = min(qty, p.count)
+                    
+                    # Format suggestion
+                    cushion = abs(p.strike - spot)
+                    suggestion = (
+                        f"{p.ticker} {hedge_side.upper()} ×{hedge_qty} "
+                        f"@ {_cents(p.current_mid)} (strike {p.strike}, "
+                        f"cushion {cushion:.2f})"
+                    )
+                    suggestions.append(suggestion)
+            
+            # If no existing positions, suggest opening a hedge
+            if not suggestions and spot:
+                hedge_side = "no" if side == "yes" else "yes"
+                # Find available contracts in the same event
+                try:
+                    # This would require Kalshi API access - provide generic suggestion
+                    suggestions.append(
+                        f"Consider opening {hedge_side.upper()} position in {event_ticker} "
+                        f"at strike near {spot:.2f}"
+                    )
+                except:
+                    pass
+            
+            return suggestions[:5]  # Limit to top 5 suggestions
+            
+        except Exception as e:
+            logger.error(f"Hedge suggestion error: {e}")
+            return []
+
+        async def request_sell_confirmation(self, eng, position, qty, reason):
         """
         Called by the engine when an automated (non-stop) sell condition is met.
         Registers the sell as pending and sends a Telegram confirmation prompt.
