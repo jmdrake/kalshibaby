@@ -389,6 +389,8 @@ class RuntimeParams(BaseModel):
     sources: Dict[str, Dict[str, Any]]
     safety: Dict[str, float] = Field(default_factory=lambda: {"global_drawdown_limit": -50.0})
     entry_zone: Dict[str, float] = Field(default_factory=lambda: {"min": 0.70, "max": 0.80})
+    wapner_close_threshold: Optional[float] = 0.95
+    wapner_min_payout: Optional[float] = 0.15
 
 
 class PricePoint(BaseModel):
@@ -658,7 +660,7 @@ class KalshiClient:
         except Exception:
             return []
 
-    async def get_markets_for_event(self, event_ticker: str) -> List[Dict]:
+    def get_markets_for_event(self, event_ticker: str) -> List[Dict]:
         """Fetch all markets for an event."""
         url = f"{self.base_url}/trade-api/v2/markets"
         try:
@@ -669,7 +671,7 @@ class KalshiClient:
         except Exception:
             return []
 
-    async def get_market_quote(self, ticker: str) -> Tuple[float, float, float, int, int]:
+    def get_market_quote(self, ticker: str) -> Tuple[float, float, float, int, int]:
         """
         Get bid/ask/mid and available quantities for a market.
         Returns: (bid, ask, mid, bid_qty, ask_qty)
@@ -1478,6 +1480,220 @@ async def api_account():
         "total_value": cash + portfolio_value,
         "realized_pl": realized_pl,
         "total_return_pct": (cash + portfolio_value - starting) / starting * 100,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Buy candidates scan — finds open contracts in the entry price zone
+# ---------------------------------------------------------------------------
+
+KALSHI_FEE_RATE = 0.07   # 7% of max(yes_price, no_price), capped at $0.07/contract
+
+
+@app.get("/api/buy_candidates")
+async def api_buy_candidates(event_ticker: Optional[str] = None):
+    """
+    Scans open markets for contracts in the configured entry_zone (default 70-80c).
+    Pass ?event_ticker=KXBRENTD-26JUN2917 to scan a specific event even with no
+    active positions.  Without it, scans all events the engine is currently tracking.
+    """
+    zone_min = engine.params.entry_zone.get("min", 0.70)
+    zone_max = engine.params.entry_zone.get("max", 0.80)
+
+    candidates = []
+
+    # Build (et, spot) pairs — direct ticker takes priority, else all tracked events
+    if event_ticker:
+        eng = engine.event_engines.get(event_ticker)
+        scan_list = [(event_ticker, eng.consensus_price() if eng else None)]
+    else:
+        scan_list = [(et, eng.consensus_price()) for et, eng in engine.event_engines.items()]
+
+    if not scan_list:
+        return {
+            "candidates": [],
+            "zone_min": zone_min,
+            "zone_max": zone_max,
+            "hint": "No active events tracked and no event_ticker param supplied. "
+                    "Try /api/buy_candidates?event_ticker=KXWTI-26AUG1114",
+        }
+
+    for event_ticker, spot in scan_list:
+        # Fetch all open markets for this event from Kalshi
+        try:
+            markets_data = engine.kalshi.get_markets_for_event(event_ticker)
+            markets = markets_data if isinstance(markets_data, list) else markets_data.get("markets", [])
+        except Exception as e:
+            continue
+
+        def _flt(v: Any) -> Optional[float]:
+            try:
+                return float(v) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        for m in markets:
+            ticker = m.get("ticker", "")
+            strike = parse_strike(ticker)
+
+            for side in ("yes", "no"):
+                bid_key = f"{side}_bid_dollars"
+                ask_key = f"{side}_ask_dollars"
+                bid = _flt(m.get(bid_key))
+                ask = _flt(m.get(ask_key))
+                if bid is None or ask is None:
+                    continue
+                mid = (bid + ask) / 2 if (bid > 0 and ask > 0) else bid or ask
+                if mid <= 0:
+                    continue
+                if not (zone_min <= mid <= zone_max):
+                    continue
+
+                # Fee estimate: 7% of the contract price, min $0.01, max $0.07
+                fee = round(min(0.07, max(0.01, mid * KALSHI_FEE_RATE)), 4)
+
+                distance: Optional[float] = None
+                if spot is not None:
+                    # For Yes: positive distance = strike is above spot (riskier)
+                    # For No:  positive distance = strike is below spot (safer)
+                    distance = round(
+                        (strike - spot) if side == "yes" else (spot - strike), 2
+                    )
+
+                candidates.append({
+                    "ticker": ticker,
+                    "event_ticker": event_ticker,
+                    "side": side,
+                    "strike": strike,
+                    "bid": round(bid, 4),
+                    "ask": round(ask, 4),
+                    "mid": round(mid, 4),
+                    "spot": round(spot, 2) if spot is not None else None,
+                    "distance": distance,
+                    "fee_per_contract": fee,
+                    "fee_3_contracts": round(fee * 3, 4),
+                })
+
+    # Sort: closest to spot first (smallest absolute distance), then by mid desc
+    candidates.sort(key=lambda c: (
+        abs(c["distance"]) if c["distance"] is not None else 999,
+        -c["mid"],
+    ))
+
+    return {"candidates": candidates, "zone_min": zone_min, "zone_max": zone_max}
+
+
+# ---------------------------------------------------------------------------
+# Wapner Window scanner — high-probability late-settlement arb candidates
+# ---------------------------------------------------------------------------
+
+@app.get("/api/wapner_candidates")
+async def api_wapner_candidates(event_ticker: Optional[str] = None):
+    """
+    Scans open markets for late-settlement arb candidates (the 'Wapner Window').
+    Returns candidates sorted by expected value (probability × net payout).
+    """
+    # Default wapner window parameters
+    close_threshold = engine.params.wapner_close_threshold or 0.95
+    min_payout = engine.params.wapner_min_payout or 0.15
+    
+    candidates = []
+
+    # Build scan list
+    if event_ticker:
+        eng = engine.event_engines.get(event_ticker)
+        scan_list = [(event_ticker, eng.consensus_price() if eng else None)]
+    else:
+        scan_list = [(et, eng.consensus_price()) for et, eng in engine.event_engines.items()]
+
+    if not scan_list:
+        return {
+            "candidates": [],
+            "close_threshold": close_threshold,
+            "min_payout": min_payout,
+            "hint": "No active events tracked and no event_ticker param supplied. "
+                    "Try /api/wapner_candidates?event_ticker=KXWTI-26AUG1114",
+        }
+
+    for event_ticker, spot in scan_list:
+        if spot is None:
+            continue
+            
+        # Fetch all open markets for this event from Kalshi
+        try:
+            markets_data = engine.kalshi.get_markets_for_event(event_ticker)
+            markets = markets_data if isinstance(markets_data, list) else markets_data.get("markets", [])
+        except Exception as e:
+            continue
+
+        def _flt(v: Any) -> Optional[float]:
+            try:
+                return float(v) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        for m in markets:
+            ticker = m.get("ticker", "")
+            strike = parse_strike(ticker)
+            
+            # Check both Yes and No sides
+            for side in ("yes", "no"):
+                bid_key = f"{side}_bid_dollars"
+                ask_key = f"{side}_ask_dollars"
+                bid = _flt(m.get(bid_key))
+                ask = _flt(m.get(ask_key))
+                
+                if bid is None or ask is None or bid <= 0 or ask <= 0:
+                    continue
+                    
+                mid = (bid + ask) / 2
+                
+                # Determine if this is in the Wapner Window (high probability zone)
+                if side == "yes":
+                    prob = mid
+                    is_in_window = mid >= close_threshold
+                    payout = 1.0 - ask  # Net gain if Yes wins
+                else:  # no side
+                    prob = 1.0 - mid
+                    is_in_window = (1.0 - mid) >= close_threshold
+                    payout = ask  # Net gain if No wins (paid ask, get $1)
+                
+                if not is_in_window:
+                    continue
+                    
+                # Calculate expected value
+                ev = prob * payout
+                
+                if ev < min_payout:
+                    continue
+                
+                # Distance from spot
+                distance = round(
+                    (strike - spot) if side == "yes" else (spot - strike), 2
+                )
+
+                candidates.append({
+                    "ticker": ticker,
+                    "event_ticker": event_ticker,
+                    "side": side,
+                    "strike": strike,
+                    "bid": round(bid, 4),
+                    "ask": round(ask, 4),
+                    "mid": round(mid, 4),
+                    "spot": round(spot, 2),
+                    "distance": distance,
+                    "probability": round(prob, 4),
+                    "payout": round(payout, 4),
+                    "expected_value": round(ev, 4),
+                })
+
+    # Sort by expected value descending
+    candidates.sort(key=lambda c: -c["expected_value"])
+
+    return {
+        "candidates": candidates,
+        "close_threshold": close_threshold,
+        "min_payout": min_payout,
     }
 
 
