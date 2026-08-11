@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 import math
+import os
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
@@ -612,15 +613,18 @@ class KalshiClient:
         self.base_url = base_url.rstrip("/")
         self.private_key = None
 
-        if private_key_path:
+        if private_key_path and os.path.exists(private_key_path):
             from cryptography.hazmat.primitives import hashes, serialization
             from cryptography.hazmat.primitives.asymmetric import padding
             with open(private_key_path, "rb") as f:
                 self.private_key = serialization.load_pem_private_key(f.read(), password=None)
 
     def _auth_headers(self, method: str, path: str) -> Dict[str, str]:
+        # For paper trading, we only need public endpoints (no auth required)
+        # If credentials are provided, use them; otherwise return empty headers for public access
         if not self.api_key_id or not self.private_key:
-            raise RuntimeError("Kalshi API credentials not configured")
+            return {"Content-Type": "application/json"}
+        
         ts = str(int(time.time() * 1000))
         msg = f"{ts}{method.upper()}{path}".encode("utf-8")
         sig = self.private_key.sign(
