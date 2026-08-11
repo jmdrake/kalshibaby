@@ -1,0 +1,14 @@
+#!/bin/bash
+# Start KalshiBaby Paper Trading Server
+
+echo "Starting KalshiBaby Paper Trading on port 8766..."
+echo "Open http://127.0.0.1:8766 in your browser"
+echo ""
+echo "Paper trading features:"
+echo "  - Live contract data from Kalshi API"
+echo "  - Simulated buys/sells against local SQLite database"
+echo "  - Partial fill handling with confirmation prompts"
+echo "  - Full portfolio tracking and P/L history"
+echo ""
+
+uvicorn kalshibaby_paper:app --host 0.0.0.0 --port 8766 --reload
